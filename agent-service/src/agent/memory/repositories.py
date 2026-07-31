@@ -136,6 +136,52 @@ class SessionRepository:
         )
         return list(result.scalars().all())
 
+    async def list_unconsolidated_user_ids(self, limit: int | None = None) -> list[str]:
+        """Users with unconsolidated messages waiting, oldest-waiting first —
+        anonymous sessions (``user_id IS NULL``) are excluded: there is no
+        owner to attribute a fact/episode to (docs/SECURITY.md §3), so their
+        messages are never consolidated, only ever session-local context.
+
+        ``limit`` bounds how many users a single sweep takes on — without it,
+        a sweep over many thousands of due users would run one LLM call after
+        another inside a single request (agent/memory/consolidation.py). The
+        oldest-first order means a capped sweep still makes fair progress
+        instead of starving the same tail of users every time.
+        """
+        query = (
+            select(ChatSession.user_id)
+            .join(ChatMessage, ChatMessage.session_id == ChatSession.id)
+            .where(
+                ChatMessage.consolidated.is_(False),
+                ChatSession.user_id.is_not(None),
+            )
+            .group_by(ChatSession.user_id)
+            .order_by(func.min(ChatMessage.seq))
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        result = await self._db.execute(query)
+        return [uid for uid in result.scalars().all() if uid is not None]
+
+    async def list_unconsolidated_for_user(
+        self, user_id: str, limit: int = 500
+    ) -> list[ChatMessage]:
+        """One user's unconsolidated messages across all their sessions,
+        oldest first. ``seq`` is a single global identity sequence (not
+        per-session), so ordering by it still gives correct chronological
+        order across a user's multiple conversations."""
+        result = await self._db.execute(
+            select(ChatMessage)
+            .join(ChatSession, ChatMessage.session_id == ChatSession.id)
+            .where(
+                ChatMessage.consolidated.is_(False),
+                ChatSession.user_id == user_id,
+            )
+            .order_by(ChatMessage.seq)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def mark_consolidated(self, message_ids: list[uuid.UUID]) -> int:
         """Mark messages as distilled. Returns how many rows changed."""
         if not message_ids:

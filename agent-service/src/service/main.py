@@ -38,6 +38,7 @@ from service.core.config import Settings, get_settings
 from service.core.llm import build_anthropic_client
 from service.core.migrations import upgrade_to_head
 from service.core.tooling import build_bnpl_client
+from service.worker import router as worker_router
 
 
 def _configure_logging(settings: Settings) -> None:
@@ -146,6 +147,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(v1_router)
+    app.include_router(worker_router)
 
     return app
 
