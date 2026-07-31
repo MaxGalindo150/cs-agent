@@ -1,0 +1,133 @@
+# Local dev stack: everything the agent needs, up with one command.
+#
+#   docker compose up --build
+#
+#   frontend      http://localhost:3000    Next.js chat UI
+#   agent-service http://localhost:8000    FastAPI agent loop (/docs in dev)
+#   mock-server   http://localhost:3001    BNPL backend the agent's tools call
+#   phoenix       http://localhost:6006    OTel trace viewer
+#   postgres      localhost:5433           agent memory & sessions
+#
+# Source is bind-mounted everywhere: both dev servers hot-reload without a
+# rebuild. Rebuild only when a manifest (pyproject/uv.lock, package.json,
+# lockfiles) changes.
+services:
+  postgres:
+    # pgvector/pgvector:pg18 = official postgres:18 + the pgvector extension,
+    # required by the semantic-memory migration (facts.embedding).
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-customer_support}
+      POSTGRES_USER: ${POSTGRES_USER:-csa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-csa}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-csa} -d ${POSTGRES_DB:-customer_support}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      # 5433 on the host (not 5432) so this stack can run alongside another
+      # local Postgres without a port clash. Inside the network peers still
+      # reach it at postgres:5432.
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+  # BNPL mock server (Hono + Bun). External system the agent's tools query.
+  mock-server:
+    build:
+      context: ./mock-server
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./mock-server:/app
+      - mock_server_node_modules:/app/node_modules
+
+  # Phoenix (Arize) — local OTel backend that renders the agent's spans as a
+  # trace tree. Dev-only: nothing in the code targets Phoenix specifically, it
+  # just speaks OTLP (agent/ops/tracing.py). Point OTEL_EXPORTER_OTLP_ENDPOINT
+  # at Langfuse instead and the same spans go there — no code change.
+  phoenix:
+    image: arizephoenix/phoenix:19.6.0
+    environment:
+      # SQLite under the mounted volume, so traces survive a restart. Fine for
+      # dev; Phoenix wants Postgres only at 10M+ spans/day.
+      PHOENIX_WORKING_DIR: /mnt/data
+    ports:
+      - "6006:6006" # UI (and the OTLP HTTP collector)
+      - "4317:4317" # OTLP gRPC — the port our exporter speaks
+    volumes:
+      - phoenix_data:/mnt/data
+
+  # Agent service (FastAPI + uv). The chat loop backend.
+  agent-service:
+    build:
+      context: ./agent-service
+    env_file:
+      # Secrets (ANTHROPIC_API_KEY, VOYAGE_API_KEY) live here, git-ignored.
+      - path: ./agent-service/.env
+        required: false
+    environment:
+      # Override the .env's localhost defaults so the container reaches its
+      # peers by compose service name. Browser-facing URLs (the frontend's
+      # NEXT_PUBLIC_API_URL) stay on localhost — the browser is on the host.
+      BNPL_API_URL: http://mock-server:3001
+      AGENT_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-csa}:${POSTGRES_PASSWORD:-csa}@postgres:5432/${POSTGRES_DB:-customer_support}
+      # Integration tests create and migrate their own database, never touching
+      # the dev one. Set here so `docker compose exec agent-service uv run
+      # pytest` works with no extra env — the conftest default targets the
+      # host-published 5433, which does not exist inside the network.
+      AGENT_TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-csa}:${POSTGRES_PASSWORD:-csa}@postgres:5432/${POSTGRES_DB:-customer_support}_test
+      # Turns the OTel sink on (empty/unset = off). gRPC, hence 4317.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://phoenix:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-server:
+        condition: service_started
+      # Startup ordering only — deliberately NOT service_healthy. Tracing must
+      # never gate or take down the service: if Phoenix is absent the exporter
+      # just drops spans and the turn still answers.
+      phoenix:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./agent-service:/app
+      - agent_service_venv:/app/.venv
+
+  # Frontend (Next.js 16 + React 19, npm).
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      # Read by the browser, so it must resolve from the host — never the
+      # compose service name. Set here (not only in .env.local) so the stack
+      # works on a fresh clone; a real env var wins over .env.local in Next.
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - agent-service
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+      # Keep the container's build cache off the host bind mount: sharing
+      # .next between a macOS host run and the Linux container corrupts it.
+      - frontend_next_cache:/app/.next
+
+volumes:
+  postgres_data:
+  # Phoenix's SQLite store — keeps traces across `docker compose restart`.
+  phoenix_data:
+  # Named volumes over the deps directories the bind mounts would otherwise
+  # shadow — keeps container-installed deps (Linux) instead of the host's
+  # (macOS venv / native node bindings would break in-container).
+  agent_service_venv:
+  frontend_node_modules:
+  frontend_next_cache:
+  mock_server_node_modules:

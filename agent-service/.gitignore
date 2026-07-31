@@ -1,0 +1,26 @@
+# Python virtual environment (managed by uv — never commit it)
+.venv/
+
+# Python caches / bytecode
+__pycache__/
+*.py[cod]
+
+# Build / packaging artifacts (editable install metadata)
+*.egg-info/
+build/
+dist/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
+.traces/
+
+# Note: .env is already git-ignored by the repo-root .gitignore; uv.lock is
+# intentionally NOT ignored (committed for reproducible installs).

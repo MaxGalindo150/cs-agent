@@ -1,0 +1,14 @@
+# Keep the build context small and never ship host-built artifacts into the
+# image: node_modules (macOS native bindings) and .next (host-compiled) are
+# replaced by named volumes at runtime — see ../docker-compose.yml.
+node_modules
+.next
+out
+build
+coverage
+.env
+.env.local
+.git
+.DS_Store
+*.tsbuildinfo
+npm-debug.log*
