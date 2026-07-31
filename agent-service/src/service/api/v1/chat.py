@@ -64,7 +64,9 @@ async def chat(
 
     # New conversation → mint a session up front (chat_messages FKs to it),
     # titled with the message that opened it.
-    session_id = req.session_id or await agent.start_session(session_title(req.message))
+    session_id = req.session_id or await agent.start_session(
+        session_title(req.message), principal=principal
+    )
     result = await agent.respond(
         session_id, req.message, source="api", principal=principal
     )

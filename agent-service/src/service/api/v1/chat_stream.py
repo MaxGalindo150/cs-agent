@@ -62,7 +62,9 @@ async def chat_stream(
 
     # New conversation → mint a session up front (before any bytes are
     # streamed), titled with the message that opened it.
-    session_id = req.session_id or await agent.start_session(session_title(req.message))
+    session_id = req.session_id or await agent.start_session(
+        session_title(req.message), principal=principal
+    )
     queue: asyncio.Queue[Any] = asyncio.Queue()
 
     def observer(kind: str, event: dict[str, Any]) -> None:

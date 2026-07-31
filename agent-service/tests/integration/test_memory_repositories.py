@@ -167,6 +167,28 @@ async def test_get_session_returns_none_when_absent(
     assert await SessionRepository(db_session).get_session(uuid.uuid4()) is None
 
 
+async def test_create_session_persists_the_owning_user_id(
+    db_session: AsyncSession,
+) -> None:
+    repo = SessionRepository(db_session)
+
+    chat = await repo.create_session(title="soporte", user_id="usr_0001")
+
+    assert chat.user_id == "usr_0001"
+    reloaded = await repo.get_session(chat.id)
+    assert reloaded is not None
+    assert reloaded.user_id == "usr_0001"
+
+
+async def test_create_session_without_a_user_id_defaults_to_null(
+    db_session: AsyncSession,
+) -> None:
+    """An anonymous conversation is still creatable — identity is optional."""
+    chat = await SessionRepository(db_session).create_session(title="anonimo")
+
+    assert chat.user_id is None
+
+
 # --- facts (semantic memory) -----------------------------------------------
 
 

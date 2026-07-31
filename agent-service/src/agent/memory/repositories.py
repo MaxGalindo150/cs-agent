@@ -37,8 +37,10 @@ class SessionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._db = session
 
-    async def create_session(self, title: str | None = None) -> ChatSession:
-        chat_session = ChatSession(title=title)
+    async def create_session(
+        self, title: str | None = None, user_id: str | None = None
+    ) -> ChatSession:
+        chat_session = ChatSession(title=title, user_id=user_id)
         self._db.add(chat_session)
         await self._db.flush()
         return chat_session

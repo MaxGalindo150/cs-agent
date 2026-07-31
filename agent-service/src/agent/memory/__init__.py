@@ -111,16 +111,22 @@ class Memory:
     # In Waku these live on the facade (they are the raw log consolidation reads
     # from, not a memory pillar). Adapted to our first-class UUID sessions
     # (agent/memory/models.py) — sessions are created explicitly, not implied.
-    async def create_session(self, title: str | None = None) -> uuid.UUID:
+    async def create_session(
+        self, title: str | None = None, user_id: str | None = None
+    ) -> uuid.UUID:
         """Create a new conversation row and return its id.
 
         Sessions are explicit here (not implied by the first message), so the
         transport mints one for a 'new chat' and hands the id back to the client
         to continue. ``chat_messages`` FKs to this row, so it must exist before
         the turn is persisted.
+
+        ``user_id`` is a plain string, never ``agent.identity.Principal`` — the
+        memory facade stays decoupled from the identity type (CLAUDE.md §4);
+        the caller (``Agent.start_session``) unwraps it.
         """
         async with self._db.session() as session:
-            row = await SessionRepository(session).create_session(title)
+            row = await SessionRepository(session).create_session(title, user_id)
         return row.id
 
     async def log_chat(

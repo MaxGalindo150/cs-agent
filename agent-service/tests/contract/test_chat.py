@@ -27,8 +27,12 @@ _SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 class _FakeAgent:
     def __init__(self) -> None:
         self.received_principal: Principal | None = None
+        self.start_session_principal: Principal | None = None
 
-    async def start_session(self, title: str | None = None) -> uuid.UUID:
+    async def start_session(
+        self, title: str | None = None, principal: Principal | None = None
+    ) -> uuid.UUID:
+        self.start_session_principal = principal
         return _SESSION_ID
 
     async def respond(
@@ -93,9 +97,10 @@ async def test_chat_forwards_the_resolved_principal_to_respond() -> None:
         )
 
     assert resp.status_code == 200
-    assert agent.received_principal == Principal(
-        user_id="usr_0001", email="alice@example.com"
-    )
+    expected = Principal(user_id="usr_0001", email="alice@example.com")
+    assert agent.received_principal == expected
+    # A brand-new conversation must also be tagged with its owner at creation.
+    assert agent.start_session_principal == expected
 
 
 async def test_chat_forwards_no_principal_when_headers_are_absent() -> None:
@@ -118,7 +123,9 @@ async def test_chat_rejects_empty_message(chat_client: httpx.AsyncClient) -> Non
 
 
 class _BoomAgent:
-    async def start_session(self, title: str | None = None) -> uuid.UUID:
+    async def start_session(
+        self, title: str | None = None, principal: Principal | None = None
+    ) -> uuid.UUID:
         return _SESSION_ID
 
     async def respond(
