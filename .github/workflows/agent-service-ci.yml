@@ -3,14 +3,8 @@ name: Agent Service CI
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "agent-service/**"
-      - ".github/workflows/agent-service-ci.yml"
   push:
     branches: [main]
-    paths:
-      - "agent-service/**"
-      - ".github/workflows/agent-service-ci.yml"
   workflow_dispatch:
 
 concurrency:
@@ -25,8 +19,29 @@ defaults:
     working-directory: agent-service
 
 jobs:
+  changes:
+    name: Detect agent-service changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      agent-service: ${{ steps.filter.outputs.agent-service }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            agent-service:
+              - 'agent-service/**'
+              - '.github/workflows/agent-service-ci.yml'
+
   lint:
     name: Lint (Ruff)
+    needs: changes
+    if: needs.changes.outputs.agent-service == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -48,6 +63,8 @@ jobs:
 
   typecheck:
     name: Typecheck (mypy --strict)
+    needs: changes
+    if: needs.changes.outputs.agent-service == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -67,6 +84,8 @@ jobs:
 
   test:
     name: Test (pytest + coverage)
+    needs: changes
+    if: needs.changes.outputs.agent-service == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -113,7 +132,7 @@ jobs:
   ci-green:
     name: Agent Service CI Green
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test]
+    needs: [changes, lint, typecheck, test]
     if: always()
     defaults:
       run:
@@ -121,6 +140,16 @@ jobs:
     steps:
       - name: Fail if any required job failed
         run: |
+          if [[ "${{ needs.changes.result }}" != "success" ]]; then
+            echo "Change-detection job failed."
+            exit 1
+          fi
+
+          if [[ "${{ needs.changes.outputs.agent-service }}" != "true" ]]; then
+            echo "No agent-service changes in this diff — nothing to verify."
+            exit 0
+          fi
+
           if [[ "${{ needs.lint.result }}" != "success" \
              || "${{ needs.typecheck.result }}" != "success" \
              || "${{ needs.test.result }}" != "success" ]]; then
