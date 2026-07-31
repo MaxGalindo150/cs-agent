@@ -15,6 +15,7 @@ import anthropic
 import httpx
 import pytest
 
+from agent.identity import Principal
 from agent.loop.agent import LoopResult
 from agent.observability import Observer
 from service.core.agent import get_agent
@@ -24,6 +25,9 @@ _SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 class _FakeAgent:
+    def __init__(self) -> None:
+        self.received_principal: Principal | None = None
+
     async def start_session(self, title: str | None = None) -> uuid.UUID:
         return _SESSION_ID
 
@@ -34,7 +38,9 @@ class _FakeAgent:
         observer: Observer | None = None,
         source: str = "api",
         stream: bool = False,
+        principal: Principal | None = None,
     ) -> LoopResult:
+        self.received_principal = principal
         return LoopResult(reply="hi from fake", iterations=1)
 
 
@@ -62,8 +68,7 @@ async def test_chat_returns_a_reply_and_the_session_id(
 
 async def test_chat_accepts_identity_headers(chat_client: httpx.AsyncClient) -> None:
     # Dev-only stub (service/core/identity.py) — the route must accept the
-    # headers without erroring, whether or not a fake Agent does anything
-    # with the resolved Principal yet.
+    # headers without erroring.
     resp = await chat_client.post(
         "/v1/chat",
         json={"message": "hello"},
@@ -71,6 +76,38 @@ async def test_chat_accepts_identity_headers(chat_client: httpx.AsyncClient) -> 
     )
 
     assert resp.status_code == 200
+
+
+async def test_chat_forwards_the_resolved_principal_to_respond() -> None:
+    """The route must not just log the header — the resolved Principal has to
+    reach `Agent.respond`, since that's what threads it into the loop/tools."""
+    app = create_app()
+    agent = _FakeAgent()
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post(
+            "/v1/chat",
+            json={"message": "hello"},
+            headers={"X-User-Id": "usr_0001", "X-User-Email": "alice@example.com"},
+        )
+
+    assert resp.status_code == 200
+    assert agent.received_principal == Principal(
+        user_id="usr_0001", email="alice@example.com"
+    )
+
+
+async def test_chat_forwards_no_principal_when_headers_are_absent() -> None:
+    app = create_app()
+    agent = _FakeAgent()
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/v1/chat", json={"message": "hello"})
+
+    assert resp.status_code == 200
+    assert agent.received_principal is None
 
 
 async def test_chat_rejects_empty_message(chat_client: httpx.AsyncClient) -> None:
@@ -91,6 +128,7 @@ class _BoomAgent:
         observer: Observer | None = None,
         source: str = "api",
         stream: bool = False,
+        principal: Principal | None = None,
     ) -> LoopResult:
         raise anthropic.APIError(
             "upstream boom", httpx.Request("POST", "http://test"), body=None

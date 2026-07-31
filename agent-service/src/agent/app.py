@@ -32,6 +32,7 @@ from typing import Any, cast
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam
 
+from agent.identity import Principal
 from agent.loop.agent import LoopResult, run_loop
 from agent.memory import Memory, MemoryConfig
 from agent.memory.db import Database
@@ -39,6 +40,7 @@ from agent.memory.embeddings import Embedder
 from agent.observability import LoopEvent, Observer
 from agent.ops.tracing import Tracer, TracerConfig, compose
 from agent.runtime.session import Session
+from agent.tools.context import ToolContext
 from agent.tools.registry import ToolRegistry
 
 
@@ -111,6 +113,7 @@ class Agent:
         observer: Observer | None = None,
         source: str = "api",
         stream: bool = False,
+        principal: Principal | None = None,
     ) -> LoopResult:
         """One full turn: assemble working memory → run the loop → persist.
 
@@ -126,6 +129,10 @@ class Agent:
         whatsapp / …) so the unified chat can show its origin. ``stream=True``
         streams the reply text token by token to the observer. Everything that
         happens is both shown (observer) and recorded (tracer).
+
+        ``principal`` is the identified end-user this turn is for (or ``None``
+        for an anonymous visitor) — wrapped once, here, into the ``ToolContext``
+        the loop forwards opaquely to ``ToolRegistry.execute``.
         """
         captured: dict[str, Any] = {}
 
@@ -138,6 +145,7 @@ class Agent:
 
         notify = compose(observer, self._tracer.event, _capture)
         t0 = time.perf_counter()
+        ctx = ToolContext(principal=principal)
 
         with self._tracer.turn(user_message, session_id=str(session_id)):
             # No held session (unlike Waku): build one per request and load this
@@ -166,6 +174,7 @@ class Agent:
                 max_tokens=self._config.max_tokens,
                 observer=notify,
                 stream=stream,
+                ctx=ctx,
             )
 
             def _status(out: str) -> str:

@@ -23,7 +23,12 @@ class Settings(BaseSettings):
     )
 
     # --- App ---
-    environment: str = Field(default="dev", alias="ENVIRONMENT")
+    # Fail-closed default: a deployment that omits ENVIRONMENT must NOT get dev
+    # behavior for free — is_development gates real trust-boundary decisions
+    # (the X-User-Id header stub in service/core/identity.py, and /docs
+    # exposure in main.py). Local dev sets this explicitly via .env
+    # (ENVIRONMENT=dev); so does the test suite (tests/conftest.py).
+    environment: str = Field(default="prod", alias="ENVIRONMENT")
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 

@@ -36,6 +36,7 @@ from anthropic.types import (
 # them - without either being wired into the loop's logic. Defined in
 # agent.observability so every layer that emits events shares one signature.
 from agent.observability import LoopEvent, Observer
+from agent.tools.context import ToolContext
 from agent.tools.registry import ToolRegistry
 
 
@@ -56,6 +57,7 @@ async def run_loop(
     max_tokens: int = 2048,
     observer: Observer | None = None,
     stream: bool = False,
+    ctx: ToolContext | None = None,
 ) -> LoopResult:
     """Run one agent turn. `messages` is mutated in place - after the call it
     contains the full working memory of the turn (assistant thoughts, tool
@@ -64,6 +66,10 @@ async def run_loop(
     stream=True emits the assistant's text as it's generated (notify("text",
     {"delta": ...})) so a gateway can show it appear token by token - used by
     the web UI. Falls back to a single call for clients without streaming.
+
+    ``ctx`` is forwarded to ``tools.execute`` untouched — the loop never reads
+    it. Identity-gating lives entirely in ``ToolRegistry.execute``; this is
+    the one line that changes, so business logic never leaks in here.
     """
 
     notify = observer or (lambda kind, ev: None)
@@ -152,7 +158,7 @@ async def run_loop(
                 },
             )
         outputs = await asyncio.gather(
-            *(tools.execute(call.name, call.input) for call in tool_uses)
+            *(tools.execute(call.name, call.input, ctx) for call in tool_uses)
         )
         tool_results: list[ToolResultBlockParam] = []
         for call, output in zip(tool_uses, outputs, strict=True):

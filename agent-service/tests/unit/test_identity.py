@@ -56,3 +56,9 @@ def test_non_dev_ignores_the_header_even_when_present() -> None:
     )
 
     assert principal is None
+
+
+def test_environment_defaults_to_a_non_dev_value() -> None:
+    """Fail-closed by construction: a deployment that omits ENVIRONMENT must
+    not silently trust X-User-Id (or expose /docs) as if it were dev."""
+    assert Settings.model_fields["environment"].default != "dev"

@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 
+from agent.identity import Principal
 from agent.loop.agent import LoopResult
 from agent.observability import Observer
 from service.core.agent import get_agent
@@ -23,6 +24,9 @@ _SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 
 
 class _StreamAgent:
+    def __init__(self) -> None:
+        self.received_principal: Principal | None = None
+
     async def start_session(self, title: str | None = None) -> uuid.UUID:
         return _SESSION_ID
 
@@ -33,7 +37,9 @@ class _StreamAgent:
         observer: Observer | None = None,
         source: str = "api",
         stream: bool = False,
+        principal: Principal | None = None,
     ) -> LoopResult:
+        self.received_principal = principal
         assert observer is not None
         observer("text", {"delta": "Hola"})
         observer("text", {"delta": " mundo"})
@@ -77,8 +83,7 @@ async def test_chat_stream_accepts_identity_headers(
     stream_client: httpx.AsyncClient,
 ) -> None:
     # Dev-only stub (service/core/identity.py) — the route must accept the
-    # headers without erroring, whether or not a fake Agent does anything
-    # with the resolved Principal yet.
+    # headers without erroring.
     async with stream_client.stream(
         "POST",
         "/v1/chat/stream",
@@ -86,6 +91,29 @@ async def test_chat_stream_accepts_identity_headers(
         headers={"X-User-Id": "usr_0001", "X-User-Email": "alice@example.com"},
     ) as resp:
         assert resp.status_code == 200
+
+
+async def test_chat_stream_forwards_the_resolved_principal_to_respond() -> None:
+    """Same contract as /v1/chat: the resolved Principal must reach
+    `Agent.respond`, not just get logged."""
+    app = create_app()
+    agent = _StreamAgent()
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        async with c.stream(
+            "POST",
+            "/v1/chat/stream",
+            json={"message": "hola"},
+            headers={"X-User-Id": "usr_0001", "X-User-Email": "alice@example.com"},
+        ) as resp:
+            assert resp.status_code == 200
+            async for _ in resp.aiter_text():
+                pass
+
+    assert agent.received_principal == Principal(
+        user_id="usr_0001", email="alice@example.com"
+    )
 
 
 class _CrashAgent:
@@ -99,6 +127,7 @@ class _CrashAgent:
         observer: Observer | None = None,
         source: str = "api",
         stream: bool = False,
+        principal: Principal | None = None,
     ) -> LoopResult:
         raise RuntimeError("sdk blew up")
 
@@ -141,6 +170,7 @@ class _ToolAgent:
         observer: Observer | None = None,
         source: str = "api",
         stream: bool = False,
+        principal: Principal | None = None,
     ) -> LoopResult:
         assert observer is not None
         observer(
