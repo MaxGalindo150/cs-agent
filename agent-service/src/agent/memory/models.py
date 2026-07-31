@@ -52,6 +52,12 @@ class ChatSession(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     title: Mapped[str | None] = mapped_column(Text)
+    # Which end-user this conversation belongs to (agent.identity.Principal,
+    # resolved by service/core/identity.py). Nullable — most sessions today
+    # have no identified user (no real auth yet), and a session must be
+    # creatable before identity is known. Not a tenant/org column — one
+    # end-user, no isolation semantics (CLAUDE.md §9).
+    user_id: Mapped[str | None] = mapped_column(String(255), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from agent.identity import Principal
 from agent.memory.db import Database
 from agent.memory.repositories import SessionRepository
 from agent.tools.registry import Tool, ToolRegistry
@@ -149,3 +150,33 @@ async def test_no_tool_turn_still_saves_meta(database: Database) -> None:
     assert meta is not None
     assert meta["gate"]["decision"] == "skip"
     assert meta["tools"] == []
+
+
+async def test_start_session_persists_the_resolved_principals_user_id(
+    database: Database,
+) -> None:
+    """`Agent.start_session` unwraps `Principal` to a plain `user_id` before
+    handing it to the memory facade — this is that seam, proven end to end."""
+    agent = make_agent(database, ScriptedClient([]))
+
+    session_id = await agent.start_session(
+        "soporte", principal=Principal(user_id="usr_0001", email="alice@example.com")
+    )
+
+    async with database.session() as session:
+        row = await SessionRepository(session).get_session(session_id)
+    assert row is not None
+    assert row.user_id == "usr_0001"
+
+
+async def test_start_session_without_a_principal_leaves_user_id_null(
+    database: Database,
+) -> None:
+    agent = make_agent(database, ScriptedClient([]))
+
+    session_id = await agent.start_session("anonimo")
+
+    async with database.session() as session:
+        row = await SessionRepository(session).get_session(session_id)
+    assert row is not None
+    assert row.user_id is None

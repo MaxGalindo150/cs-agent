@@ -26,8 +26,12 @@ _SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 class _StreamAgent:
     def __init__(self) -> None:
         self.received_principal: Principal | None = None
+        self.start_session_principal: Principal | None = None
 
-    async def start_session(self, title: str | None = None) -> uuid.UUID:
+    async def start_session(
+        self, title: str | None = None, principal: Principal | None = None
+    ) -> uuid.UUID:
+        self.start_session_principal = principal
         return _SESSION_ID
 
     async def respond(
@@ -111,13 +115,15 @@ async def test_chat_stream_forwards_the_resolved_principal_to_respond() -> None:
             async for _ in resp.aiter_text():
                 pass
 
-    assert agent.received_principal == Principal(
-        user_id="usr_0001", email="alice@example.com"
-    )
+    expected = Principal(user_id="usr_0001", email="alice@example.com")
+    assert agent.received_principal == expected
+    assert agent.start_session_principal == expected
 
 
 class _CrashAgent:
-    async def start_session(self, title: str | None = None) -> uuid.UUID:
+    async def start_session(
+        self, title: str | None = None, principal: Principal | None = None
+    ) -> uuid.UUID:
         return _SESSION_ID
 
     async def respond(
@@ -160,7 +166,9 @@ async def test_chat_stream_maps_unexpected_error_to_sse_event(
 
 
 class _ToolAgent:
-    async def start_session(self, title: str | None = None) -> uuid.UUID:
+    async def start_session(
+        self, title: str | None = None, principal: Principal | None = None
+    ) -> uuid.UUID:
         return _SESSION_ID
 
     async def respond(

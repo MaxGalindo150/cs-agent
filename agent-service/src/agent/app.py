@@ -100,11 +100,18 @@ class Agent:
         self._tracer = tracer
         self._config = config
 
-    async def start_session(self, title: str | None = None) -> uuid.UUID:
+    async def start_session(
+        self, title: str | None = None, principal: Principal | None = None
+    ) -> uuid.UUID:
         """Create a fresh conversation and return its id. The transport calls this
         when a request arrives with no ``session_id`` (a 'new chat'); the client
-        then echoes the id back on later turns to continue the thread."""
-        return await self._memory.create_session(title)
+        then echoes the id back on later turns to continue the thread.
+
+        ``principal`` is unwrapped to a plain ``user_id`` string here — the
+        one seam between the identity type and the memory facade, which never
+        imports ``agent.identity`` (CLAUDE.md §4)."""
+        user_id = principal.user_id if principal else None
+        return await self._memory.create_session(title, user_id=user_id)
 
     async def respond(
         self,
