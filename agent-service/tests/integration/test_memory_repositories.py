@@ -201,7 +201,7 @@ async def test_fact_full_text_search_matches_across_stemming(
     await repo.add("alex", "A Alex le gusta el café colombiano")
     await repo.add("maria", "María prefiere el té verde")
 
-    found = await repo.search("gustar")
+    found = await repo.search("gustar", user_id=None)
     assert [f.subject for f in found] == ["alex"]
 
 
@@ -211,7 +211,7 @@ async def test_fact_search_ignores_stopwords_and_accents_via_stemming(
     repo = FactRepository(db_session)
     await repo.add("alex", "A Alex le gusta el café colombiano")
 
-    assert len(await repo.search("cafe")) == 1
+    assert len(await repo.search("cafe", user_id=None)) == 1
 
 
 async def test_fact_search_returns_empty_when_nothing_matches(
@@ -220,7 +220,7 @@ async def test_fact_search_returns_empty_when_nothing_matches(
     repo = FactRepository(db_session)
     await repo.add("alex", "A Alex le gusta el café")
 
-    assert await repo.search("bicicleta") == []
+    assert await repo.search("bicicleta", user_id=None) == []
 
 
 async def test_facts_listed_by_subject_newest_first(
@@ -231,9 +231,83 @@ async def test_facts_listed_by_subject_newest_first(
     await repo.add("alex", "cambió de trabajo")
     await repo.add("maria", "estudia diseño")
 
-    facts = await repo.list_by_subject("alex")
+    facts = await repo.list_by_subject("alex", user_id=None)
     assert len(facts) == 2
     assert {f.content for f in facts} == {"vive en Caracas", "cambió de trabajo"}
+
+
+async def test_fact_search_never_crosses_users(db_session: AsyncSession) -> None:
+    """The whole point of facts.user_id (docs/SECURITY.md §3): Alice's facts
+    must be invisible to Bob's search, even when both mention the same words."""
+    repo = FactRepository(db_session)
+    await repo.add("plan", "el cliente está en el plan Pro", user_id="usr_alice")
+    await repo.add("plan", "el cliente está en el plan Pro", user_id="usr_bob")
+
+    found = await repo.search("plan pro", user_id="usr_alice")
+
+    assert len(found) == 1
+    assert found[0].user_id == "usr_alice"
+
+
+async def test_fact_list_by_subject_never_crosses_users(
+    db_session: AsyncSession,
+) -> None:
+    repo = FactRepository(db_session)
+    await repo.add("alex", "vive en Caracas", user_id="usr_alice")
+    await repo.add("alex", "vive en Bogotá", user_id="usr_bob")
+
+    found = await repo.list_by_subject("alex", user_id="usr_alice")
+
+    assert [f.content for f in found] == ["vive en Caracas"]
+
+
+async def test_fact_search_with_no_user_id_only_matches_ownerless_rows(
+    db_session: AsyncSession,
+) -> None:
+    """`user_id=None` is not "no filter" — it only matches rows with no
+    owner. An identified user's facts stay invisible to an anonymous caller."""
+    repo = FactRepository(db_session)
+    await repo.add("plan", "el cliente está en el plan Pro", user_id="usr_alice")
+
+    assert await repo.search("plan pro", user_id=None) == []
+
+
+async def test_fact_update_cannot_touch_another_users_fact(
+    db_session: AsyncSession,
+) -> None:
+    repo = FactRepository(db_session)
+    fact = await repo.add("plan", "está en el plan Pro", user_id="usr_alice")
+
+    changed = await repo.update(fact.id, "usr_bob", "hackeado")
+
+    assert changed is False
+    [reloaded] = await repo.list_by_subject("plan", user_id="usr_alice")
+    assert reloaded.content == "está en el plan Pro"
+
+
+async def test_fact_update_changes_the_owners_own_fact(
+    db_session: AsyncSession,
+) -> None:
+    repo = FactRepository(db_session)
+    fact = await repo.add("plan", "está en el plan Pro", user_id="usr_alice")
+
+    changed = await repo.update(fact.id, "usr_alice", "está en el plan Elite", "plan")
+
+    assert changed is True
+    [reloaded] = await repo.list_by_subject("plan", user_id="usr_alice")
+    assert reloaded.content == "está en el plan Elite"
+
+
+async def test_fact_delete_cannot_touch_another_users_fact(
+    db_session: AsyncSession,
+) -> None:
+    repo = FactRepository(db_session)
+    fact = await repo.add("vpn", "usa split tunnel", user_id="usr_alice")
+
+    deleted = await repo.delete(fact.id, "usr_bob")
+
+    assert deleted is False
+    assert len(await repo.list_by_subject("vpn", user_id="usr_alice")) == 1
 
 
 async def test_invalid_fact_source_is_rejected_by_the_database(
@@ -257,12 +331,67 @@ async def test_episode_search_and_recency(db_session: AsyncSession) -> None:
         datetime(2026, 6, 1, tzinfo=UTC), "Se resolvió el envío tardío del pedido"
     )
 
-    recent = await repo.list_recent()
+    recent = await repo.list_recent(user_id=None)
     assert recent[0].summary.startswith("Se resolvió")
 
-    found = await repo.search("cobro duplicado")
+    found = await repo.search("cobro duplicado", user_id=None)
     assert len(found) == 1
     assert "cobro duplicado" in found[0].summary
+
+
+async def test_episode_search_never_crosses_users(db_session: AsyncSession) -> None:
+    repo = EpisodeRepository(db_session)
+    await repo.add(
+        datetime(2026, 5, 1, tzinfo=UTC), "reclamo resuelto", user_id="usr_alice"
+    )
+    await repo.add(
+        datetime(2026, 5, 1, tzinfo=UTC), "reclamo resuelto", user_id="usr_bob"
+    )
+
+    found = await repo.search("reclamo", user_id="usr_alice")
+
+    assert len(found) == 1
+    assert found[0].user_id == "usr_alice"
+
+
+async def test_episode_list_recent_never_crosses_users(
+    db_session: AsyncSession,
+) -> None:
+    repo = EpisodeRepository(db_session)
+    await repo.add(datetime(2026, 5, 1, tzinfo=UTC), "de alice", user_id="usr_alice")
+    await repo.add(datetime(2026, 6, 1, tzinfo=UTC), "de bob", user_id="usr_bob")
+
+    recent = await repo.list_recent(user_id="usr_alice")
+
+    assert [ep.summary for ep in recent] == ["de alice"]
+
+
+async def test_episode_delete_cannot_touch_another_users_episode(
+    db_session: AsyncSession,
+) -> None:
+    repo = EpisodeRepository(db_session)
+    episode = await repo.add(
+        datetime(2026, 5, 1, tzinfo=UTC), "algo pasó", user_id="usr_alice"
+    )
+
+    deleted = await repo.delete(episode.id, "usr_bob")
+
+    assert deleted is False
+    assert len(await repo.list_recent(user_id="usr_alice")) == 1
+
+
+async def test_episode_delete_removes_the_owners_own_episode(
+    db_session: AsyncSession,
+) -> None:
+    repo = EpisodeRepository(db_session)
+    episode = await repo.add(
+        datetime(2026, 5, 1, tzinfo=UTC), "algo pasó", user_id="usr_alice"
+    )
+
+    deleted = await repo.delete(episode.id, "usr_alice")
+
+    assert deleted is True
+    assert await repo.list_recent(user_id="usr_alice") == []
 
 
 async def test_episode_search_is_limited_by_the_spanish_stemmer(
@@ -278,5 +407,5 @@ async def test_episode_search_is_limited_by_the_spanish_stemmer(
     repo = EpisodeRepository(db_session)
     await repo.add(datetime(2026, 5, 1, tzinfo=UTC), "El cliente reclamó un cobro")
 
-    assert await repo.search("reclamos") == []
-    assert len(await repo.search("reclamo")) == 1
+    assert await repo.search("reclamos", user_id=None) == []
+    assert len(await repo.search("reclamo", user_id=None)) == 1

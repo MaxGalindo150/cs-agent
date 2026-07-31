@@ -161,7 +161,8 @@ class Agent:
             # lives in the process between requests (CLAUDE.md §9).
             session = Session(session_id, memory=self._memory)
             await session.switch(session_id, self._config.history_turns)
-            system = await session.build_system(user_message, notify=notify)
+            user_id = principal.user_id if principal else None
+            system = await session.build_system(user_message, user_id, notify=notify)
 
             # session.history is list[dict]; the loop wants the SDK's MessageParam.
             # Cast at this boundary (as the loop casts its tool schemas) — the

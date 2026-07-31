@@ -185,3 +185,44 @@ def test_schemas_expose_the_api_shape() -> None:
     assert reg.schemas() == [
         {"name": "t", "description": "test tool", "input_schema": _SCHEMA}
     ]
+
+
+def test_schemas_never_expose_requires_identity_itself() -> None:
+    """The flag is harness plumbing — the model must never see it as a
+    schema property, only observe its effect (the tool being absent)."""
+    reg = ToolRegistry()
+    reg.register(_tool("whoami", _noop, requires_identity=True))
+
+    schema = reg.schemas(ToolContext(principal=Principal(user_id="usr_1")))[0]
+
+    assert "requires_identity" not in schema
+
+
+def test_schemas_omits_identity_gated_tools_without_a_principal() -> None:
+    """An anonymous turn must not even see a tool it can never call — no
+    wasted context, no round trip to discover the gate the hard way."""
+    reg = ToolRegistry()
+    reg.register(_tool("echo", _noop))
+    reg.register(_tool("whoami", _noop, requires_identity=True))
+
+    names = {s["name"] for s in reg.schemas()}
+
+    assert names == {"echo"}
+
+
+def test_schemas_omits_identity_gated_tools_with_an_empty_context() -> None:
+    reg = ToolRegistry()
+    reg.register(_tool("whoami", _noop, requires_identity=True))
+
+    assert reg.schemas(ToolContext(principal=None)) == []
+
+
+def test_schemas_includes_identity_gated_tools_once_identified() -> None:
+    reg = ToolRegistry()
+    reg.register(_tool("echo", _noop))
+    reg.register(_tool("whoami", _noop, requires_identity=True))
+    ctx = ToolContext(principal=Principal(user_id="usr_1"))
+
+    names = {s["name"] for s in reg.schemas(ctx)}
+
+    assert names == {"echo", "whoami"}

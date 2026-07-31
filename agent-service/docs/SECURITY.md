@@ -20,10 +20,11 @@ just by setting the header. Impersonation is trivial in dev.
 
 **Blast radius today:** bounded. Nothing currently *reads* `user_id` to
 authorize access — it is write-only attribution data (which conversation
-"belongs" to whom), not yet an access-control gate. It graduates from
+"belongs" to whom, or which fact/episode is about whom — `facts.user_id` /
+`episodes.user_id`), not yet an access-control gate. It graduates from
 "corrupted ownership data" to "real access-control bypass" the moment
 something scopes a *read* by trusting this value — e.g. a "list my
-sessions" endpoint, or the planned `facts.user_id` semantic-memory scoping.
+sessions" endpoint, or semantic-memory retrieval filtered by `user_id`.
 
 **Accepted because:** this is an explicit, temporary stub (see the
 docstring in `service/core/identity.py`), built to simulate per-user
@@ -57,8 +58,35 @@ endpoints: reject (or silently start a fresh session) when
 
 ---
 
+## 3. Facts and episodes must never be creatable without an identified user
+
+**What:** every `Fact` and `Episode` row is inherently personal (a fact
+*about* someone, an episode of something that happened *to* someone) — there
+is no "global"/shared-memory use case in this domain. `facts.user_id` /
+`episodes.user_id` exist (nullable, for migration convenience) ahead of any
+write path — nothing creates facts or episodes yet (no `remember` tool, no
+consolidation worker; see `agent/memory/__init__.py`).
+
+**Rule:** when that write path is built (a memory-management tool ported
+from `waku-agent`'s `manage_memory`, and/or a consolidation worker), it must
+require a resolved `Principal` and refuse to write when there is none —
+mirroring the `requires_identity` gate already enforced for tools in
+`agent/tools/registry.py::ToolRegistry.execute`. An anonymous visitor's
+"I'm Max" is fine as *session-local* context (it already lives in
+`chat_messages` for that conversation) — it must never become a durable,
+cross-session fact with no owner.
+
+**Read side:** retrieval (`Memory.gated_retrieve` → `facts.search` /
+`episodes.search`) must filter by the caller's `user_id` — never return, nor
+search across, another user's facts/episodes.
+
+---
+
 ## Referenced from
 
 - `src/service/core/identity.py` — the stub itself.
-- `src/agent/memory/models.py` — `ChatSession.user_id`.
+- `src/agent/memory/models.py` — `ChatSession.user_id`, `Fact.user_id`,
+  `Episode.user_id`.
+- `src/agent/tools/registry.py` — `Tool.requires_identity` gate (the pattern
+  item 3's future write path must reuse).
 - `docs/ADR/0002-memory-and-session-persistence.md` — session persistence.

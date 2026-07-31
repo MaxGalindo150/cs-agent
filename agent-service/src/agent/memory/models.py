@@ -139,6 +139,13 @@ class Fact(Base):
     source: Mapped[str] = mapped_column(
         String(32), server_default="user", nullable=False
     )
+    # Which end-user this fact is about (agent.identity.Principal). Nullable
+    # for now: nothing writes facts yet (no remember tool, no consolidation —
+    # agent/memory/__init__.py), so there is no existing row to migrate. Every
+    # fact is inherently personal (see the class docstring) — there is no
+    # "global fact" use case — so the write path being built next must always
+    # supply this. NOT a verified identity today: see docs/SECURITY.md §1-2.
+    user_id: Mapped[str | None] = mapped_column(String(255), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -169,6 +176,11 @@ class Episode(Base):
         DateTime(timezone=True), nullable=False
     )
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    # Which end-user this episode is about — same rationale as Fact.user_id
+    # above: nullable for now (nothing writes episodes yet), but every episode
+    # is inherently personal, so the future write path must always supply it.
+    # NOT a verified identity today: see docs/SECURITY.md §1-2.
+    user_id: Mapped[str | None] = mapped_column(String(255), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

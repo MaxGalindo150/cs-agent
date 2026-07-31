@@ -31,24 +31,33 @@ class PostgresEpisodeStore:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    async def add(self, summary: str, happened_at: datetime) -> None:
+    async def add(
+        self, summary: str, happened_at: datetime, user_id: str | None = None
+    ) -> None:
         async with self._db.session() as session:
-            await EpisodeRepository(session).add(happened_at, summary)
+            await EpisodeRepository(session).add(happened_at, summary, user_id=user_id)
 
-    async def search(self, query: str, top_k: int = 3) -> list[str]:
-        """Relevance first (full text), most recent first among matches.
+    async def search(
+        self, query: str, user_id: str | None, top_k: int = 3
+    ) -> list[str]:
+        """Relevance first (full text), most recent first among matches, for
+        this owner only.
 
         A query with no usable terms falls back to plain recency rather than
         returning nothing — the same behaviour as Waku.
         """
         if not _SEARCHABLE.search(query):
-            return await self.recent(top_k)
+            return await self.recent(user_id, top_k)
         async with self._db.session() as session:
-            episodes = await EpisodeRepository(session).search(query, limit=top_k)
+            episodes = await EpisodeRepository(session).search(
+                query, user_id, limit=top_k
+            )
             return [f"({ep.happened_at:%Y-%m-%d}) {ep.summary}" for ep in episodes]
 
-    async def recent(self, top_k: int = 3) -> list[str]:
-        """The most recent episodes, formatted for injection."""
+    async def recent(self, user_id: str | None, top_k: int = 3) -> list[str]:
+        """The most recent episodes for this owner, formatted for injection."""
         async with self._db.session() as session:
-            episodes = await EpisodeRepository(session).list_recent(limit=top_k)
+            episodes = await EpisodeRepository(session).list_recent(
+                user_id, limit=top_k
+            )
             return [f"({ep.happened_at:%Y-%m-%d}) {ep.summary}" for ep in episodes]

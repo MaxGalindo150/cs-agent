@@ -39,11 +39,18 @@ class PostgresFactStore:
         self._db = db
         self._embedder = embedder
 
-    async def add(self, subject: str, content: str, source: str = "user") -> None:
+    async def add(
+        self,
+        subject: str,
+        content: str,
+        source: str = "user",
+        user_id: str | None = None,
+    ) -> None:
         """Store a fact, embedding it first so the write session stays short.
 
         A failed embedding does not lose the fact: it is written without a
         vector and remains findable by full text (and re-embeddable later).
+        ``user_id`` scopes the fact to its owner (docs/SECURITY.md §3).
         """
         embedding: list[float] | None = None
         model: str | None = None
@@ -58,11 +65,19 @@ class PostgresFactStore:
 
         async with self._db.session() as session:
             await FactRepository(session).add(
-                subject, content, source, embedding=embedding, embedding_model=model
+                subject,
+                content,
+                source,
+                user_id=user_id,
+                embedding=embedding,
+                embedding_model=model,
             )
 
-    async def search(self, query: str, top_k: int = 4) -> list[str]:
-        """Most-relevant facts, formatted for injection as ``[subject] content``.
+    async def search(
+        self, query: str, user_id: str | None, top_k: int = 4
+    ) -> list[str]:
+        """Most-relevant facts for this owner, formatted for injection as
+        ``[subject] content``. Never returns another user's facts.
 
         Strings are built while the session is still open — the ORM rows are not
         used after the ``with`` block closes.
@@ -80,8 +95,8 @@ class PostgresFactStore:
         async with self._db.session() as session:
             repo = FactRepository(session)
             facts = (
-                await repo.search_semantic(embedding, limit=top_k)
+                await repo.search_semantic(embedding, user_id, limit=top_k)
                 if embedding is not None
-                else await repo.search(query, limit=top_k)
+                else await repo.search(query, user_id, limit=top_k)
             )
             return [f"[{fact.subject}] {fact.content}" for fact in facts]

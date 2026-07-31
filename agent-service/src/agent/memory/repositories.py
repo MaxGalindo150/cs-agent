@@ -31,6 +31,13 @@ from agent.memory.models import ChatMessage, ChatSession, Episode, Fact
 _FTS_DICTIONARY = "spanish"
 
 
+def _owner_filter(column: Any, user_id: str | None) -> Any:
+    """Every fact/episode query must filter by owner — there is no "no filter"
+    mode (docs/SECURITY.md §3). ``user_id=None`` filters for rows with no
+    owner (``IS NULL``), it never means "match every user's rows"."""
+    return column.is_(None) if user_id is None else column == user_id
+
+
 class SessionRepository:
     """Conversations: sessions and their raw message log."""
 
@@ -155,18 +162,22 @@ class FactRepository:
         subject: str,
         content: str,
         source: str = "user",
+        user_id: str | None = None,
         embedding: list[float] | None = None,
         embedding_model: str | None = None,
     ) -> Fact:
         """Store a fact, optionally with its embedding (ADR-0003).
 
         ``embedding`` is left NULL when embedding is unavailable — the fact is
-        still written and stays findable by full text.
+        still written and stays findable by full text. ``user_id`` is who the
+        fact is about (docs/SECURITY.md §3) — every fact is personal, so a
+        future write path must always supply it.
         """
         fact = Fact(
             subject=subject,
             content=content,
             source=source,
+            user_id=user_id,
             embedding=embedding,
             embedding_model=embedding_model if embedding is not None else None,
         )
@@ -174,17 +185,21 @@ class FactRepository:
         await self._db.flush()
         return fact
 
-    async def list_by_subject(self, subject: str, limit: int = 50) -> list[Fact]:
+    async def list_by_subject(
+        self, subject: str, user_id: str | None, limit: int = 50
+    ) -> list[Fact]:
         result = await self._db.execute(
             select(Fact)
-            .where(Fact.subject == subject)
+            .where(Fact.subject == subject, _owner_filter(Fact.user_id, user_id))
             .order_by(Fact.created_at.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
 
-    async def search(self, query: str, limit: int = 20) -> list[Fact]:
-        """Full-text search, most relevant first.
+    async def search(
+        self, query: str, user_id: str | None, limit: int = 20
+    ) -> list[Fact]:
+        """Full-text search, most relevant first, scoped to one owner.
 
         ``plainto_tsquery`` takes a plain phrase (no operator syntax), so
         untrusted text can be passed straight through — it cannot inject query
@@ -194,16 +209,19 @@ class FactRepository:
         rank = func.ts_rank(Fact.content_tsv, tsquery)
         result = await self._db.execute(
             select(Fact)
-            .where(Fact.content_tsv.op("@@")(tsquery))
+            .where(
+                Fact.content_tsv.op("@@")(tsquery), _owner_filter(Fact.user_id, user_id)
+            )
             .order_by(rank.desc(), Fact.created_at.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
 
     async def search_semantic(
-        self, embedding: list[float], limit: int = 20
+        self, embedding: list[float], user_id: str | None, limit: int = 20
     ) -> list[Fact]:
-        """Nearest facts by meaning — cosine distance over the HNSW index.
+        """Nearest facts by meaning — cosine distance over the HNSW index,
+        scoped to one owner.
 
         Ranking happens entirely in Postgres (``<=>``); the stored vectors are
         never loaded into Python. Rows without an embedding are excluded rather
@@ -211,11 +229,41 @@ class FactRepository:
         """
         result = await self._db.execute(
             select(Fact)
-            .where(Fact.embedding.is_not(None))
+            .where(Fact.embedding.is_not(None), _owner_filter(Fact.user_id, user_id))
             .order_by(Fact.embedding.cosine_distance(embedding))
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def update(
+        self,
+        fact_id: uuid.UUID,
+        user_id: str | None,
+        content: str,
+        subject: str | None = None,
+    ) -> bool:
+        """Correct a fact's content (and optionally its subject).
+
+        Scoped by owner in the same statement as the id match — never two
+        separate checks — so there is no window where an id belonging to
+        another user could be updated (docs/SECURITY.md §3).
+        """
+        values: dict[str, Any] = {"content": content}
+        if subject is not None:
+            values["subject"] = subject
+        result = await self._db.execute(
+            update(Fact)
+            .where(Fact.id == fact_id, _owner_filter(Fact.user_id, user_id))
+            .values(**values)
+        )
+        return cast(CursorResult[Any], result).rowcount > 0
+
+    async def delete(self, fact_id: uuid.UUID, user_id: str | None) -> bool:
+        """Forget a fact. Scoped by owner — see `update` for why."""
+        result = await self._db.execute(
+            delete(Fact).where(Fact.id == fact_id, _owner_filter(Fact.user_id, user_id))
+        )
+        return cast(CursorResult[Any], result).rowcount > 0
 
 
 class EpisodeRepository:
@@ -224,26 +272,50 @@ class EpisodeRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._db = session
 
-    async def add(self, happened_at: datetime, summary: str) -> Episode:
-        episode = Episode(happened_at=happened_at, summary=summary)
+    async def add(
+        self, happened_at: datetime, summary: str, user_id: str | None = None
+    ) -> Episode:
+        """``user_id`` is who the episode is about (docs/SECURITY.md §3) —
+        every episode is personal, so a future write path must always supply
+        it."""
+        episode = Episode(happened_at=happened_at, summary=summary, user_id=user_id)
         self._db.add(episode)
         await self._db.flush()
         return episode
 
-    async def list_recent(self, limit: int = 20) -> list[Episode]:
+    async def list_recent(self, user_id: str | None, limit: int = 20) -> list[Episode]:
         result = await self._db.execute(
-            select(Episode).order_by(Episode.happened_at.desc()).limit(limit)
+            select(Episode)
+            .where(_owner_filter(Episode.user_id, user_id))
+            .order_by(Episode.happened_at.desc())
+            .limit(limit)
         )
         return list(result.scalars().all())
 
-    async def search(self, query: str, limit: int = 20) -> list[Episode]:
-        """Full-text search over episode summaries, most relevant first."""
+    async def search(
+        self, query: str, user_id: str | None, limit: int = 20
+    ) -> list[Episode]:
+        """Full-text search over episode summaries, most relevant first,
+        scoped to one owner."""
         tsquery = func.plainto_tsquery(_FTS_DICTIONARY, query)
         rank = func.ts_rank(Episode.summary_tsv, tsquery)
         result = await self._db.execute(
             select(Episode)
-            .where(Episode.summary_tsv.op("@@")(tsquery))
+            .where(
+                Episode.summary_tsv.op("@@")(tsquery),
+                _owner_filter(Episode.user_id, user_id),
+            )
             .order_by(rank.desc(), Episode.happened_at.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def delete(self, episode_id: uuid.UUID, user_id: str | None) -> bool:
+        """Forget an episode. Scoped by owner in the same statement as the id
+        match (docs/SECURITY.md §3) — no separate check to get out of sync."""
+        result = await self._db.execute(
+            delete(Episode).where(
+                Episode.id == episode_id, _owner_filter(Episode.user_id, user_id)
+            )
+        )
+        return cast(CursorResult[Any], result).rowcount > 0

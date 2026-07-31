@@ -78,12 +78,18 @@ class Memory:
         self.skills = SkillLoader([REPO_SKILLS])
 
     # ---- retrieval (gated — see retrieval_gate.py for why) -----------------
-    async def gated_retrieve(self, message: str, notify: Observer | None = None) -> str:
+    async def gated_retrieve(
+        self, message: str, user_id: str | None, notify: Observer | None = None
+    ) -> str:
         """Fetch relevant memory for a turn — but only if the gate says to.
 
         The gate is one cheap LLM call and touches no DB; the search that
         follows opens a short session and closes it. They run in sequence, never
         overlapping, so no connection is ever held across the LLM call.
+
+        ``user_id`` scopes both stores to one owner (docs/SECURITY.md §3) — it
+        is required, not defaulted away, so a caller can never forget to pass
+        it and accidentally search across every user's memory.
         """
         retrieve, query, reason = await should_retrieve(
             self._client, self._config.fast_model, message
@@ -95,8 +101,8 @@ class Memory:
             )
         if not retrieve:
             return ""
-        found = await self.facts.search(query, self._config.retrieval_top_k)
-        found += await self.episodes.search(query, self._config.episode_top_k)
+        found = await self.facts.search(query, user_id, self._config.retrieval_top_k)
+        found += await self.episodes.search(query, user_id, self._config.episode_top_k)
         return "\n".join(found)
 
     # ---- procedural --------------------------------------------------------

@@ -67,9 +67,11 @@ async def run_loop(
     {"delta": ...})) so a gateway can show it appear token by token - used by
     the web UI. Falls back to a single call for clients without streaming.
 
-    ``ctx`` is forwarded to ``tools.execute`` untouched — the loop never reads
-    it. Identity-gating lives entirely in ``ToolRegistry.execute``; this is
-    the one line that changes, so business logic never leaks in here.
+    ``ctx`` is forwarded to ``tools.schemas``/``tools.execute`` untouched — the
+    loop never reads it. Identity-gating (which tools the model even sees, and
+    which calls are allowed to run) lives entirely in ``ToolRegistry``; these
+    are the only two lines that touch ``ctx``, so business logic never leaks
+    in here.
     """
 
     notify = observer or (lambda kind, ev: None)
@@ -77,7 +79,7 @@ async def run_loop(
     can_stream = stream and hasattr(client.messages, "stream")
     # The registry stays provider-neutral (plain dicts); adapt to the SDK's
     # ToolParam only here, at the Anthropic boundary.
-    tool_schemas = cast("list[ToolParam]", tools.schemas())
+    tool_schemas = cast("list[ToolParam]", tools.schemas(ctx))
 
     for iteration in range(1, max_iterations + 1):
         result.iterations = iteration

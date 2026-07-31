@@ -103,8 +103,23 @@ class ToolRegistry:
             raise ValueError(f"tool already registered: {tool.name}")
         self._tools[tool.name] = tool
 
-    def schemas(self) -> list[dict[str, Any]]:
-        return [t.to_api() for t in self._tools.values()]
+    def schemas(self, ctx: ToolContext | None = None) -> list[dict[str, Any]]:
+        """The tools the model may call this turn — never the ones it
+        structurally can't use.
+
+        A tool with ``requires_identity=True`` is omitted entirely when there
+        is no resolved ``Principal``, not merely rejected if called: an
+        anonymous turn wastes no context on a tool it can never use, and the
+        model never gets a round trip to discover that the hard way. Same
+        ``ctx``/``requires_identity`` this registry already gates ``execute``
+        on — no new concept.
+        """
+        identified = ctx is not None and ctx.principal is not None
+        return [
+            t.to_api()
+            for t in self._tools.values()
+            if identified or not t.requires_identity
+        ]
 
     def label(self, name: str, args: dict[str, Any]) -> str:
         """What a UI should show while this call runs. An unknown tool still
