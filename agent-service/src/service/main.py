@@ -90,11 +90,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # connections. Routes reach it via the get_llm_client dependency.
     app.state.llm = build_anthropic_client(settings)
     app.state.bnpl = build_bnpl_client(settings)
-    # Assemble the tool registry once, bound to the process-wide BNPL client.
-    app.state.registry = build_registry(app.state.bnpl)
-    # Durable stores for memory & sessions (pooled) + the assembled Agent — the
-    # brain the request path calls. Built once; nothing conversation-specific.
+    # Durable stores for memory & sessions (pooled) — built before the registry
+    # since manage_memory (agent/tools/implementations/memory.py) needs it.
     app.state.db = build_database(settings)
+    # Assemble the tool registry once, bound to the process-wide BNPL client
+    # and the memory database.
+    app.state.registry = build_registry(app.state.bnpl, app.state.db)
+    # The assembled Agent — the brain the request path calls. Built once;
+    # nothing conversation-specific lives on it.
     app.state.embedder = build_embedder(settings)
     app.state.agent = build_service_agent(
         settings,

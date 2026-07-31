@@ -59,7 +59,10 @@ class Session:
         self.history: list[dict[str, Any]] = []
 
     async def build_system(
-        self, user_message: str, notify: Observer | None = None
+        self,
+        user_message: str,
+        user_id: str | None = None,
+        notify: Observer | None = None,
     ) -> str:
         # The service should know the request-handling clock so the model can
         # resolve relative dates ("ayer", "en 30 minutos"). TODO: timezone via env.
@@ -73,7 +76,9 @@ class Session:
             # Hero moment #1: a cheap judge decides IF we retrieve at all —
             # default-on retrieval is slow and biases answers (see
             # memory/retrieval_gate.py). Async here because the gate calls the LLM.
-            retrieved = await self.memory.gated_retrieve(user_message, notify=notify)
+            retrieved = await self.memory.gated_retrieve(
+                user_message, user_id, notify=notify
+            )
             if retrieved:
                 parts.append("\nRelevant memory:\n" + retrieved)
             skills = self.memory.matching_skills(user_message)

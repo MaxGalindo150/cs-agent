@@ -319,6 +319,39 @@ async def test_identity_gated_tool_without_ctx_is_refused_not_crashed() -> None:
     )
 
 
+async def test_anonymous_turn_never_sees_an_identity_gated_tools_schema() -> None:
+    """The model shouldn't waste a round trip discovering a tool it can never
+    call — it should never see the tool at all (registry.schemas gating)."""
+    reg = ToolRegistry()
+    _register(reg, "echo", _echo_fn, requires_identity=False)
+    _register(reg, "whoami", _echo_fn, requires_identity=True)
+
+    client = FakeClient([_msg(_text("hi"))])
+
+    await _run(client, "m", "sys", [{"role": "user", "content": "hi"}], reg)
+
+    sent_names = {t["name"] for t in client.messages.calls[0]["tools"]}
+    assert sent_names == {"echo"}
+
+
+async def test_identified_turn_sees_every_tool_including_gated_ones() -> None:
+    reg = ToolRegistry()
+    _register(reg, "echo", _echo_fn, requires_identity=False)
+    _register(reg, "whoami", _echo_fn, requires_identity=True)
+
+    client = FakeClient([_msg(_text("hi"))])
+    ctx = ToolContext(principal=Principal(user_id="usr_1"))
+
+    await _run(client, "m", "sys", [{"role": "user", "content": "hi"}], reg, ctx=ctx)
+
+    sent_names = {t["name"] for t in client.messages.calls[0]["tools"]}
+    assert sent_names == {"echo", "whoami"}
+
+
+async def _echo_fn(**_: object) -> str:
+    return "x"
+
+
 # ---- fake client: streaming path -----------------------------------------
 
 

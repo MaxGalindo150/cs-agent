@@ -52,14 +52,26 @@ def test_episodes_tsvector_is_generated_stored_with_gin_index() -> None:
     _assert_generated_gin("episodes", "summary_tsv", "ix_episodes_summary_tsv")
 
 
-def test_chat_sessions_user_id_is_nullable_and_indexed() -> None:
-    """Which end-user a conversation belongs to (agent.identity.Principal) —
-    nullable because most sessions have no identified user yet, indexed
-    because it's the column future per-user queries filter by."""
-    table = _table("chat_sessions")
+def _assert_user_id_nullable_and_indexed(table_name: str) -> None:
+    """Which end-user a row belongs to (agent.identity.Principal) — nullable
+    because nothing identified writes it yet, indexed because it's the
+    column future per-user queries filter by."""
+    table = _table(table_name)
     col = table.c["user_id"]
     assert col.nullable is True
     assert any("user_id" in ix.columns for ix in table.indexes)
+
+
+def test_chat_sessions_user_id_is_nullable_and_indexed() -> None:
+    _assert_user_id_nullable_and_indexed("chat_sessions")
+
+
+def test_facts_user_id_is_nullable_and_indexed() -> None:
+    _assert_user_id_nullable_and_indexed("facts")
+
+
+def test_episodes_user_id_is_nullable_and_indexed() -> None:
+    _assert_user_id_nullable_and_indexed("episodes")
 
 
 def test_chat_message_guards_role_and_cascades_from_session() -> None:

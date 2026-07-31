@@ -57,9 +57,13 @@ class _FakeStore:
     def __init__(self, results: list[str]) -> None:
         self._results = results
         self.queries: list[str] = []
+        self.user_ids: list[str | None] = []
 
-    async def search(self, query: str, top_k: int = 4) -> list[str]:
+    async def search(
+        self, query: str, user_id: str | None, top_k: int = 4
+    ) -> list[str]:
         self.queries.append(query)
+        self.user_ids.append(user_id)
         return list(self._results)
 
 
@@ -98,7 +102,7 @@ async def test_skips_retrieval_and_touches_no_store_when_gate_says_no(
     def notify(kind: str, event: dict[str, Any]) -> None:
         events.append((kind, event))
 
-    out = await mem.gated_retrieve("¡gracias!", notify=notify)
+    out = await mem.gated_retrieve("¡gracias!", "usr_0001", notify=notify)
 
     assert out == ""
     assert facts.queries == []  # the store is never hit on a skip
@@ -119,13 +123,16 @@ async def test_joins_facts_and_episodes_using_the_gates_query(
         config=MemoryConfig(fast_model="fast", retrieval_top_k=2, episode_top_k=1),
     )
 
-    out = await mem.gated_retrieve("sigue fallando la vpn")
+    out = await mem.gated_retrieve("sigue fallando la vpn", "usr_0001")
 
     assert "split tunnel" in out
     assert "timeout de vpn" in out
     # the search runs on the gate's distilled query, not the raw message
     assert facts.queries == ["vpn"]
     assert episodes.queries == ["vpn"]
+    # and every search is scoped to the caller — never left unfiltered
+    assert facts.user_ids == ["usr_0001"]
+    assert episodes.user_ids == ["usr_0001"]
 
 
 async def test_fail_open_searches_with_the_raw_message(
@@ -135,7 +142,7 @@ async def test_fail_open_searches_with_the_raw_message(
     episodes = _FakeStore([])
     mem = _memory(RuntimeError("gate down"), facts, episodes, monkeypatch)
 
-    out = await mem.gated_retrieve("¿cuál es mi plan?")
+    out = await mem.gated_retrieve("¿cuál es mi plan?", "usr_0001")
 
     # gate failed → fail open → retrieve using the message itself as the query
     assert facts.queries == ["¿cuál es mi plan?"]
