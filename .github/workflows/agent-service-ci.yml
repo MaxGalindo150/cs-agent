@@ -1,0 +1,170 @@
+name: Agent Service CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: agent-service-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: agent-service
+
+jobs:
+  changes:
+    name: Detect agent-service changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      agent-service: ${{ steps.filter.outputs.agent-service }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            agent-service:
+              - 'agent-service/**'
+              - '.github/workflows/agent-service-ci.yml'
+
+  lint:
+    name: Lint (Ruff)
+    needs: changes
+    if: needs.changes.outputs.agent-service == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - name: Verify lockfile matches pyproject.toml
+        run: uv lock --check
+      - name: Sync dependencies
+        run: uv sync --locked --extra dev
+      - name: Ruff check
+        run: uv run ruff check src tests
+      - name: Ruff format
+        run: uv run ruff format --check src tests
+
+  typecheck:
+    name: Typecheck (mypy --strict)
+    needs: changes
+    if: needs.changes.outputs.agent-service == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - name: Verify lockfile matches pyproject.toml
+        run: uv lock --check
+      - name: Sync dependencies
+        run: uv sync --locked --extra dev
+      - name: Run mypy
+        run: uv run mypy src tests
+
+  test:
+    name: Test (pytest + coverage)
+    needs: changes
+    if: needs.changes.outputs.agent-service == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        # pgvector/pgvector:pg18 = official postgres:18 + pgvector, required by
+        # the semantic-memory migration (facts.embedding). Matches the compose
+        # service in docker-compose.yml so integration tests behave the same
+        # locally and in CI.
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: csa
+          POSTGRES_PASSWORD: csa
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U csa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - name: Verify lockfile matches pyproject.toml
+        run: uv lock --check
+      - name: Sync dependencies
+        run: uv sync --locked --extra dev
+      - name: Run tests with coverage (fail_under=80 set in pyproject.toml)
+        run: |
+          uv run pytest --cov --cov-report=term-missing --cov-report=xml:coverage.xml -q
+      - name: Write coverage summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage — agent-service"
+            echo
+            uv run coverage report --format=markdown || echo "_No coverage data to summarize._"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agent-service-coverage-xml
+          path: agent-service/coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ci-green:
+    name: Agent Service CI Green
+    runs-on: ubuntu-latest
+    needs: [changes, lint, typecheck, test]
+    if: always()
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Fail if any required job failed
+        run: |
+          if [[ "${{ needs.changes.result }}" != "success" ]]; then
+            echo "Change-detection job failed."
+            exit 1
+          fi
+
+          if [[ "${{ needs.changes.outputs.agent-service }}" != "true" ]]; then
+            echo "No agent-service changes in this diff — nothing to verify."
+            exit 0
+          fi
+
+          if [[ "${{ needs.lint.result }}" != "success" \
+             || "${{ needs.typecheck.result }}" != "success" \
+             || "${{ needs.test.result }}" != "success" ]]; then
+            echo "One or more required jobs failed."
+            echo "lint=${{ needs.lint.result }}"
+            echo "typecheck=${{ needs.typecheck.result }}"
+            echo "test=${{ needs.test.result }}"
+            exit 1
+          fi
+          echo "All required jobs passed."
