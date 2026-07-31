@@ -57,6 +57,10 @@ class ChatSession(Base):
     # have no identified user (no real auth yet), and a session must be
     # creatable before identity is known. Not a tenant/org column — one
     # end-user, no isolation semantics (CLAUDE.md §9).
+    #
+    # NOT a verified identity today — self-asserted via a dev-only header
+    # stub. Do not use this column for authorization until that stub is
+    # replaced by real auth. See docs/SECURITY.md §1-2.
     user_id: Mapped[str | None] = mapped_column(String(255), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

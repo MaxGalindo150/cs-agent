@@ -11,6 +11,9 @@ When real auth lands, only this function's body changes (verify a bearer JWT,
 extract its subject claim instead of trusting a header) — its shape
 (``-> Principal | None``) stays the same, so no route or agent-layer code
 changes when that swap happens.
+
+Security notes (self-asserted identity, session-ownership on resume): see
+``docs/SECURITY.md`` §1-2.
 """
 
 from __future__ import annotations

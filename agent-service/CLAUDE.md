@@ -187,5 +187,6 @@ Target: 80%+ coverage on business logic.
 ## 11. Pointers
 
 - Architecture decisions: `docs/ADR/` (start at `0001-agent-architecture-harness.md`).
+- Security notes (known limitations, accepted risks, their fix conditions): `docs/SECURITY.md`.
 - Runbook (3am): `docs/runbook.md` (planned).
 - Parent monorepo docs (`../docs/*`) describe the retired Go platform and are being realigned — treat them as historical until updated.
