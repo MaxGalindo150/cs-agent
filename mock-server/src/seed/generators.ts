@@ -76,18 +76,34 @@ export function makeMerchants(): Merchant[] {
 
 // ── Users ───────────────────────────────────────────────────────────
 
-export function makeUser(): User {
-  const firstName = f.person.firstName();
-  const lastName = f.person.lastName();
+export interface UserOverrides {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  status?: User["status"];
+  kycStatus?: User["kycStatus"];
+}
+
+/** Every field is optional and falls back to the seeded faker instance — the
+ * demo seed (see seed.ts) passes fixed identity fields so its users have
+ * memorable, stable names/emails across restarts. */
+export function makeUser(overrides: UserOverrides = {}): User {
+  const firstName = overrides.firstName ?? f.person.firstName();
+  const lastName = overrides.lastName ?? f.person.lastName();
   return {
     id: id("usr"),
-    email: f.internet.email({ firstName, lastName }).toLowerCase(),
-    phone: f.phone.number(),
+    email: overrides.email ?? f.internet.email({ firstName, lastName }).toLowerCase(),
+    phone: overrides.phone ?? f.phone.number(),
     firstName,
     lastName,
     dob: new Date(f.date.birthdate({ min: 18, max: 75 })).toISOString(),
-    status: f.number.float({ min: 0, max: 1 }) < 0.92 ? "active" : pick(["suspended", "blocked"]),
-    kycStatus: f.helpers.arrayElement(["verified", "verified", "verified", "pending", "unverified"]),
+    status:
+      overrides.status ??
+      (f.number.float({ min: 0, max: 1 }) < 0.92 ? "active" : pick(["suspended", "blocked"])),
+    kycStatus:
+      overrides.kycStatus ??
+      f.helpers.arrayElement(["verified", "verified", "verified", "pending", "unverified"]),
     avatarUrl: null,
     scenarioTags: [],
     createdAt: isoDaysAgo(randInt(30, 730)),

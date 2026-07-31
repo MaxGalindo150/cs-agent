@@ -109,8 +109,12 @@ services:
       # compose service name. Set here (not only in .env.local) so the stack
       # works on a fresh clone; a real env var wins over .env.local in Next.
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      # Host-app login simulation (lib/identity/) reads the mock BNPL backend
+      # directly from the browser — same host-resolution rule as above.
+      NEXT_PUBLIC_BNPL_API_URL: http://localhost:3001
     depends_on:
       - agent-service
+      - mock-server
     ports:
       - "3000:3000"
     volumes:

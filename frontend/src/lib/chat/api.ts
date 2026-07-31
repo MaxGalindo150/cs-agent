@@ -28,6 +28,12 @@ export interface StreamChatOptions {
   message: string;
   /** Continue an existing conversation. Omit to start a new one. */
   conversationId?: string;
+  /**
+   * The simulated host-app identity (see lib/identity/), forwarded as
+   * X-User-Id/X-User-Email headers for agent-service's identity harness.
+   * Omit for an anonymous/guest visitor.
+   */
+  principal?: { userId: string; email?: string };
   /** Called for every text delta as it arrives. */
   onDelta: (delta: string) => void;
   /**
@@ -59,6 +65,7 @@ export interface StreamChatOptions {
 export async function streamChat({
   message,
   conversationId,
+  principal,
   onDelta,
   onConversationId,
   onGate,
@@ -67,9 +74,13 @@ export async function streamChat({
   onLimitReached,
   signal,
 }: StreamChatOptions): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (principal?.userId) headers["X-User-Id"] = principal.userId;
+  if (principal?.email) headers["X-User-Email"] = principal.email;
+
   const res = await fetch(`${API_URL}/v1/chat/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     // `session_id: undefined` is dropped by JSON.stringify, so a new
     // conversation sends just `{ message }` and the server mints an id.
     body: JSON.stringify({ message, session_id: conversationId }),

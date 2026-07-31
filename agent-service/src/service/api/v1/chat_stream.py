@@ -33,8 +33,10 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from agent.app import Agent
+from agent.identity import Principal
 from service.api.v1.chat import ChatRequest, session_title
 from service.core.agent import get_agent
+from service.core.identity import get_principal
 
 log = structlog.get_logger()
 
@@ -51,7 +53,16 @@ def _sse(event: str, data: Any) -> str:
 async def chat_stream(
     req: ChatRequest,
     agent: Agent = Depends(get_agent),
+    principal: Principal | None = Depends(get_principal),
 ) -> StreamingResponse:
+    # Not yet wired into Agent.start_session/respond — this is just the
+    # transport accepting and resolving the identity headers (see
+    # service/core/identity.py). Threading it into the loop/tools is next.
+    log.info(
+        "chat_stream.principal_resolved",
+        user_id=principal.user_id if principal else None,
+    )
+
     # New conversation → mint a session up front (before any bytes are
     # streamed), titled with the message that opened it.
     session_id = req.session_id or await agent.start_session(session_title(req.message))

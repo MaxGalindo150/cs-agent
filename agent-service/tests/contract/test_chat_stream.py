@@ -73,6 +73,21 @@ async def test_chat_stream_emits_session_then_deltas_then_done(
     assert "Hola mundo" in body
 
 
+async def test_chat_stream_accepts_identity_headers(
+    stream_client: httpx.AsyncClient,
+) -> None:
+    # Dev-only stub (service/core/identity.py) — the route must accept the
+    # headers without erroring, whether or not a fake Agent does anything
+    # with the resolved Principal yet.
+    async with stream_client.stream(
+        "POST",
+        "/v1/chat/stream",
+        json={"message": "hola"},
+        headers={"X-User-Id": "usr_0001", "X-User-Email": "alice@example.com"},
+    ) as resp:
+        assert resp.status_code == 200
+
+
 class _CrashAgent:
     async def start_session(self, title: str | None = None) -> uuid.UUID:
         return _SESSION_ID
