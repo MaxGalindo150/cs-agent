@@ -75,6 +75,12 @@ def make_manage_memory_tool(db: Database) -> Tool:
             if action == "update":
                 if kind != "fact":
                     return "Only facts can be updated (episodes are historical)."
+                if not content:
+                    # Unlike subject (optional — `subject or None` leaves it
+                    # untouched), content has no "leave as-is" meaning: an
+                    # update IS a new content. Reject rather than silently
+                    # wiping the fact to an empty string.
+                    return "update needs content — say what the fact should now say."
                 ok = await FactRepository(session).update(
                     fact_or_episode_id, user_id, content, subject or None
                 )

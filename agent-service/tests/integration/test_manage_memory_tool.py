@@ -100,6 +100,27 @@ async def test_update_corrects_the_callers_own_fact(database: Database) -> None:
         assert reloaded.content == "está en el plan Elite"
 
 
+async def test_update_without_content_is_rejected_not_silently_emptied(
+    database: Database,
+) -> None:
+    """content has no "leave as-is" meaning (unlike subject) — omitting it
+    must not silently wipe the fact's content to an empty string."""
+    async with database.session() as session:
+        fact = await FactRepository(session).add(
+            "plan", "está en el plan Pro", user_id="usr_alice"
+        )
+        fact_id = fact.id
+
+    out = await _tool(database).fn(_ALICE, action="update", id=str(fact_id))
+
+    assert out == "update needs content — say what the fact should now say."
+    async with database.session() as session:
+        [reloaded] = await FactRepository(session).list_by_subject(
+            "plan", user_id="usr_alice"
+        )
+        assert reloaded.content == "está en el plan Pro"  # untouched
+
+
 async def test_update_cannot_reach_another_users_fact(database: Database) -> None:
     """The whole point of this tool: an id Bob doesn't own is invisible to
     him, not just refused with a different message."""
