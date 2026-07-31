@@ -14,7 +14,9 @@ from typing import Any, Literal, cast
 import anthropic
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 
+from agent.identity import Principal
 from agent.loop.agent import LoopResult, run_loop
+from agent.tools.context import ToolContext
 from agent.tools.registry import Tool, ToolRegistry
 
 _SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
@@ -46,8 +48,21 @@ def _msg(
     )
 
 
-def _register(reg: ToolRegistry, name: str, fn: Callable[..., Awaitable[str]]) -> None:
-    reg.register(Tool(name=name, description="d", input_schema=_SCHEMA, fn=fn))
+def _register(
+    reg: ToolRegistry,
+    name: str,
+    fn: Callable[..., Awaitable[str]],
+    requires_identity: bool = False,
+) -> None:
+    reg.register(
+        Tool(
+            name=name,
+            description="d",
+            input_schema=_SCHEMA,
+            fn=fn,
+            requires_identity=requires_identity,
+        )
+    )
 
 
 def _run(
@@ -251,6 +266,57 @@ async def test_hits_iteration_limit_guardrail() -> None:
     assert result.iterations == 3
     assert "iteration limit" in result.reply
     assert len(client.messages.calls) == 3
+
+
+async def test_ctx_threads_through_to_an_identity_gated_tool() -> None:
+    """The loop never inspects ``ctx`` — it only forwards whatever the caller
+    passed straight into ``tools.execute``. Regression guard for "identity
+    logic leaked into the loop"."""
+    seen: list[ToolContext] = []
+
+    async def whoami(ctx: ToolContext) -> str:
+        seen.append(ctx)
+        assert ctx.principal is not None
+        return ctx.principal.user_id
+
+    reg = ToolRegistry()
+    _register(reg, "whoami", whoami, requires_identity=True)
+
+    client = FakeClient(
+        [
+            _msg(_tool_use("whoami", {}, "toolu_1"), stop_reason="tool_use"),
+            _msg(_text("done")),
+        ]
+    )
+    ctx = ToolContext(principal=Principal(user_id="usr_1"))
+
+    result = await _run(
+        client, "m", "sys", [{"role": "user", "content": "who am i"}], reg, ctx=ctx
+    )
+
+    assert seen == [ctx]
+    assert result.tool_calls == [{"tool": "whoami", "args": {}, "output": "usr_1"}]
+
+
+async def test_identity_gated_tool_without_ctx_is_refused_not_crashed() -> None:
+    async def whoami(ctx: ToolContext) -> str:
+        return "should not run"
+
+    reg = ToolRegistry()
+    _register(reg, "whoami", whoami, requires_identity=True)
+
+    client = FakeClient(
+        [
+            _msg(_tool_use("whoami", {}, "toolu_1"), stop_reason="tool_use"),
+            _msg(_text("done")),
+        ]
+    )
+
+    result = await _run(client, "m", "sys", [{"role": "user", "content": "hi"}], reg)
+
+    assert result.tool_calls[0]["output"].startswith(
+        "Error: whoami requires an identified user"
+    )
 
 
 # ---- fake client: streaming path -----------------------------------------

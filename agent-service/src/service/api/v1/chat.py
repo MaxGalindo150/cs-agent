@@ -57,9 +57,6 @@ async def chat(
     agent: Agent = Depends(get_agent),
     principal: Principal | None = Depends(get_principal),
 ) -> ChatResponse:
-    # Not yet wired into Agent.start_session/respond — this is just the
-    # transport accepting and resolving the identity headers (see
-    # service/core/identity.py). Threading it into the loop/tools is next.
     log.info(
         "chat.principal_resolved",
         user_id=principal.user_id if principal else None,
@@ -68,7 +65,9 @@ async def chat(
     # New conversation → mint a session up front (chat_messages FKs to it),
     # titled with the message that opened it.
     session_id = req.session_id or await agent.start_session(session_title(req.message))
-    result = await agent.respond(session_id, req.message, source="api")
+    result = await agent.respond(
+        session_id, req.message, source="api", principal=principal
+    )
     return ChatResponse(
         reply=result.reply,
         iterations=result.iterations,

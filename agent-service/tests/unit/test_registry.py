@@ -5,13 +5,23 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from agent.identity import Principal
+from agent.tools.context import ToolContext
 from agent.tools.registry import Tool, ToolRegistry
 
 _SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
 
 
-def _tool(name: str, fn: Callable[..., Awaitable[str]]) -> Tool:
-    return Tool(name=name, description="test tool", input_schema=_SCHEMA, fn=fn)
+def _tool(
+    name: str, fn: Callable[..., Awaitable[str]], requires_identity: bool = False
+) -> Tool:
+    return Tool(
+        name=name,
+        description="test tool",
+        input_schema=_SCHEMA,
+        fn=fn,
+        requires_identity=requires_identity,
+    )
 
 
 async def test_execute_runs_the_tool_and_returns_its_string() -> None:
@@ -96,6 +106,73 @@ def test_registry_labels_an_unregistered_tool() -> None:
     """The loop announces a call before `execute` can reject it, so labelling
     must not depend on the tool existing."""
     assert ToolRegistry().label("get_order", {"order_id": "x"}) == "Getting order"
+
+
+async def test_identity_gated_tool_is_refused_without_a_principal() -> None:
+    ran: list[ToolContext | None] = []
+
+    async def whoami(ctx: ToolContext) -> str:
+        ran.append(ctx)
+        return "ran"
+
+    reg = ToolRegistry()
+    reg.register(_tool("whoami", whoami, requires_identity=True))
+
+    out = await reg.execute("whoami", {})
+
+    assert out == (
+        "Error: whoami requires an identified user, but none is "
+        "available for this conversation."
+    )
+    assert ran == []  # fn never called — gate short-circuits before execution
+
+
+async def test_identity_gated_tool_is_refused_with_an_empty_context() -> None:
+    """A ``ToolContext`` with no ``principal`` is the same as no context at
+    all — the gate checks the principal, not just the envelope's presence."""
+
+    async def whoami(ctx: ToolContext) -> str:
+        return "ran"
+
+    reg = ToolRegistry()
+    reg.register(_tool("whoami", whoami, requires_identity=True))
+
+    out = await reg.execute("whoami", {}, ToolContext(principal=None))
+
+    assert out.startswith("Error: whoami requires an identified user")
+
+
+async def test_identity_gated_tool_runs_with_a_resolved_principal() -> None:
+    seen: list[ToolContext] = []
+
+    async def whoami(ctx: ToolContext) -> str:
+        seen.append(ctx)
+        assert ctx.principal is not None
+        return f"you are {ctx.principal.user_id}"
+
+    reg = ToolRegistry()
+    reg.register(_tool("whoami", whoami, requires_identity=True))
+    ctx = ToolContext(principal=Principal(user_id="usr_1"))
+
+    out = await reg.execute("whoami", {}, ctx)
+
+    assert out == "you are usr_1"
+    assert seen == [ctx]  # the exact context object is injected, not rebuilt
+
+
+async def test_a_non_identity_tool_ignores_an_unused_context() -> None:
+    """A tool that doesn't require identity is called the old way (no ``ctx``
+    kwarg) even when the caller happens to pass one — so an ordinary tool's
+    signature never needs to change."""
+
+    async def echo(text: str) -> str:
+        return f"echo:{text}"
+
+    reg = ToolRegistry()
+    reg.register(_tool("echo", echo))
+    ctx = ToolContext(principal=Principal(user_id="usr_1"))
+
+    assert await reg.execute("echo", {"text": "hi"}, ctx) == "echo:hi"
 
 
 def test_schemas_expose_the_api_shape() -> None:

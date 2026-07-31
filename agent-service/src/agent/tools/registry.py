@@ -12,6 +12,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from agent.tools.context import ToolContext
+
 # `{arg}` placeholders in a progress_label. Deliberately not str.format: that
 # would expose format specs and attribute access (`{a.__class__}`) to a template
 # interpolated with model-supplied arguments, and would raise KeyError the first
@@ -53,6 +55,12 @@ class Tool:
     so the tool is the single source of truth for how it presents itself and a
     rename can never leave a client showing a stale label.
     """
+
+    requires_identity: bool = False
+    """If true, ``ToolRegistry.execute`` refuses to run this tool unless the
+    call carries a ``ToolContext`` with a resolved ``Principal`` — and calls
+    ``fn(ctx=ctx, **args)`` instead of ``fn(**args)``. Never exposed in
+    ``to_api()``: the model never sees this flag, only its effect."""
 
     def to_api(self) -> dict[str, Any]:
         """The shape the Messages API expects in its `tools=` parameter."""
@@ -105,13 +113,29 @@ class ToolRegistry:
         tool = self._tools.get(name)
         return tool.label(args) if tool else _derive_label(name)
 
-    async def execute(self, name: str, args: dict[str, Any]) -> str:
+    async def execute(
+        self, name: str, args: dict[str, Any], ctx: ToolContext | None = None
+    ) -> str:
         """Run one tool call safely: the model observes errors as text instead
-        of crashing the loop (execute_tool_safely pattern)."""
+        of crashing the loop (execute_tool_safely pattern).
+
+        ``ctx`` is opaque to every caller above this method (the loop only
+        forwards it) — this is the one place that inspects it, so identity
+        logic never leaks into ``run_loop`` or individual tool closures. A
+        tool with ``requires_identity=True`` and no resolved ``Principal``
+        is refused before ``fn`` ever runs.
+        """
         tool = self._tools.get(name)
         if tool is None:
             return f"Error: unknown tool '{name}'"
+        if tool.requires_identity and (ctx is None or ctx.principal is None):
+            return (
+                f"Error: {name} requires an identified user, but none is "
+                "available for this conversation."
+            )
         try:
+            if tool.requires_identity:
+                return await tool.fn(ctx=ctx, **args)
             return await tool.fn(**args)
         except Exception as exc:  # surface, don't crash — the model can retry
             return f"Error running {name}: {exc}"

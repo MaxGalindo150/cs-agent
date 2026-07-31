@@ -55,9 +55,6 @@ async def chat_stream(
     agent: Agent = Depends(get_agent),
     principal: Principal | None = Depends(get_principal),
 ) -> StreamingResponse:
-    # Not yet wired into Agent.start_session/respond — this is just the
-    # transport accepting and resolving the identity headers (see
-    # service/core/identity.py). Threading it into the loop/tools is next.
     log.info(
         "chat_stream.principal_resolved",
         user_id=principal.user_id if principal else None,
@@ -106,6 +103,7 @@ async def chat_stream(
                 observer=observer,
                 source="api",
                 stream=True,
+                principal=principal,
             )
             queue.put_nowait(("done", result.reply))
         except anthropic.APIError as exc:
