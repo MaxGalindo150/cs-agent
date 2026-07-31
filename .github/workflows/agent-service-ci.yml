@@ -115,6 +115,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, typecheck, test]
     if: always()
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: Fail if any required job failed
         run: |
