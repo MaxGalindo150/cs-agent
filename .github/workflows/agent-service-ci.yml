@@ -120,6 +120,14 @@ jobs:
       - name: Run tests with coverage (fail_under=80 set in pyproject.toml)
         run: |
           uv run pytest --cov --cov-report=term-missing --cov-report=xml:coverage.xml -q
+      - name: Write coverage summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage — agent-service"
+            echo
+            uv run coverage report --format=markdown || echo "_No coverage data to summarize._"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
