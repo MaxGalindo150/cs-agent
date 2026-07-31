@@ -11,11 +11,16 @@ from __future__ import annotations
 
 import uuid
 
+import structlog
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from agent.app import Agent
+from agent.identity import Principal
 from service.core.agent import get_agent
+from service.core.identity import get_principal
+
+log = structlog.get_logger()
 
 router = APIRouter(tags=["chat"])
 
@@ -50,7 +55,16 @@ class ChatResponse(BaseModel):
 async def chat(
     req: ChatRequest,
     agent: Agent = Depends(get_agent),
+    principal: Principal | None = Depends(get_principal),
 ) -> ChatResponse:
+    # Not yet wired into Agent.start_session/respond — this is just the
+    # transport accepting and resolving the identity headers (see
+    # service/core/identity.py). Threading it into the loop/tools is next.
+    log.info(
+        "chat.principal_resolved",
+        user_id=principal.user_id if principal else None,
+    )
+
     # New conversation → mint a session up front (chat_messages FKs to it),
     # titled with the message that opened it.
     session_id = req.session_id or await agent.start_session(session_title(req.message))

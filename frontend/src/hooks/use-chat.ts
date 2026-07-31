@@ -17,6 +17,9 @@ export interface UseChatOptions {
   /** Called after a send settles (reply persisted) so callers can refresh the
    *  conversation list. */
   onConversationUpdate?: () => void;
+  /** The simulated host-app identity to attach to every sent message (see
+   *  lib/identity/). Omit for an anonymous/guest visitor. */
+  principal?: { userId: string; email?: string };
 }
 
 export interface UseChat {
@@ -45,7 +48,7 @@ export interface UseChat {
  * the same conversation. `reset` starts a new thread; `load` opens an existing.
  */
 export function useChat(options: UseChatOptions = {}): UseChat {
-  const { onConversationUpdate } = options;
+  const { onConversationUpdate, principal } = options;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -122,6 +125,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       streamChat({
         message: trimmed,
         conversationId: conversationIdRef.current ?? undefined,
+        principal,
         signal: controller.signal,
         onConversationId: (id) => setConversation(id),
         onGate: (decision) => {
@@ -178,6 +182,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       finishStep,
       setConversation,
       onConversationUpdate,
+      principal,
     ],
   );
 

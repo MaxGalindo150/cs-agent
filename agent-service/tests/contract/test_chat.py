@@ -60,6 +60,19 @@ async def test_chat_returns_a_reply_and_the_session_id(
     assert body["session_id"] == str(_SESSION_ID)
 
 
+async def test_chat_accepts_identity_headers(chat_client: httpx.AsyncClient) -> None:
+    # Dev-only stub (service/core/identity.py) — the route must accept the
+    # headers without erroring, whether or not a fake Agent does anything
+    # with the resolved Principal yet.
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={"message": "hello"},
+        headers={"X-User-Id": "usr_0001", "X-User-Email": "alice@example.com"},
+    )
+
+    assert resp.status_code == 200
+
+
 async def test_chat_rejects_empty_message(chat_client: httpx.AsyncClient) -> None:
     # Validation at the boundary: Field(min_length=1) → 422, the agent never runs.
     resp = await chat_client.post("/v1/chat", json={"message": ""})
