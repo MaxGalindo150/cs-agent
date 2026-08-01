@@ -178,7 +178,13 @@ class Agent:
             if fixed is not None:
                 notify("text", {"delta": fixed})
                 await session.add_exchange(
-                    user_message, fixed, source=source, meta={"fixed_response": True}
+                    user_message,
+                    fixed,
+                    source=source,
+                    meta={
+                        "fixed_response": True,
+                        "segments": [{"type": "text", "text": fixed}],
+                    },
                 )
                 self._tracer.end_turn(fixed, 0)
                 return LoopResult(reply=fixed, tool_calls=[], iterations=0)
@@ -225,6 +231,11 @@ class Agent:
                     {"tool": c["tool"], "status": _status(c["output"])}
                     for c in result.tool_calls
                 ],
+                # The ordered text/tool-call trail, so a reopened thread can
+                # render tool activity inline between the sentences that
+                # surrounded it instead of collapsing everything above the
+                # final text (see frontend/src/lib/chat/types.ts::MessagePart).
+                "segments": result.segments,
                 # which brain answered this turn — so a reopened thread (or a
                 # thread you switched models mid-way) shows it per card.
                 "model": self._config.model,

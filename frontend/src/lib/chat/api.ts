@@ -20,7 +20,13 @@
 //
 // Naming: the API's "session" is the UI's "conversation" (see lib/chat/types.ts).
 
-import type { ConversationSummary, Message, ToolEvent } from "@/lib/chat/types";
+import type {
+  ActivityStep,
+  ConversationSummary,
+  Message,
+  MessagePart,
+  ToolEvent,
+} from "@/lib/chat/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -192,12 +198,16 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
   if (!res.ok) {
     throw new Error(`request failed: ${res.status} ${res.statusText}`);
   }
-  const rows: Array<{ id: string; role: string; content: string }> =
-    await res.json();
+  const rows: Array<{
+    id: string;
+    role: string;
+    content: string;
+    meta: Record<string, unknown> | null;
+  }> = await res.json();
   return rows.map((m) => ({
     id: m.id,
     role: m.role === "user" ? "user" : "assistant",
-    content: m.content,
+    parts: partsFromSegments(m.meta?.segments, m.content),
   }));
 }
 
@@ -209,6 +219,49 @@ export async function deleteConversation(conversationId: string): Promise<void> 
   if (!res.ok) {
     throw new Error(`request failed: ${res.status} ${res.statusText}`);
   }
+}
+
+/**
+ * Rebuilds a reloaded assistant message's ordered parts from
+ * `meta.segments` (agent-service's `agent/loop/agent.py::LoopResult.segments`,
+ * persisted verbatim). Falls back to one text part built from `content` when
+ * there's no usable segments — an older row logged before this existed, or a
+ * plain user message, which never has segments.
+ *
+ * Treated as untrusted wire data (server JSON, not a typed contract): a
+ * malformed segment is skipped rather than trusted, so one bad row degrades
+ * to the plain-text fallback instead of crashing the whole transcript.
+ */
+function partsFromSegments(segments: unknown, fallbackContent: string): MessagePart[] {
+  const fallback: MessagePart[] = fallbackContent
+    ? [{ type: "text", text: fallbackContent }]
+    : [];
+  if (!Array.isArray(segments) || segments.length === 0) return fallback;
+
+  const parts: MessagePart[] = [];
+  for (const raw of segments) {
+    if (!raw || typeof raw !== "object") continue;
+    const seg = raw as Record<string, unknown>;
+    if (seg.type === "text" && typeof seg.text === "string") {
+      parts.push({ type: "text", text: seg.text });
+    } else if (seg.type === "tools" && Array.isArray(seg.calls)) {
+      const steps = stepsFromCalls(seg.calls);
+      if (steps.length > 0) parts.push({ type: "steps", steps });
+    }
+  }
+  return parts.length > 0 ? parts : fallback;
+}
+
+function stepsFromCalls(calls: unknown[]): ActivityStep[] {
+  const steps: ActivityStep[] = [];
+  calls.forEach((raw, i) => {
+    if (!raw || typeof raw !== "object") return;
+    const call = raw as Record<string, unknown>;
+    const tool = typeof call.tool === "string" ? call.tool : undefined;
+    const label = typeof call.label === "string" ? call.label : (tool ?? "Tool call");
+    steps.push({ id: `${tool ?? "tool"}-${i}`, kind: "tool", tool, label, status: "done" });
+  });
+  return steps;
 }
 
 /** Parses a single raw SSE event block into its event name and joined data. */

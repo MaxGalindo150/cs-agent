@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict
@@ -51,6 +52,10 @@ class MessageOut(BaseModel):
     id: uuid.UUID
     role: str
     content: str
+    # Per-turn telemetry, including the ordered text/tool-call trail
+    # (`meta["segments"]`) a client needs to render tool activity in place on
+    # reload — absent on user messages and on turns logged before this existed.
+    meta: dict[str, Any] | None
     created_at: datetime
 
 

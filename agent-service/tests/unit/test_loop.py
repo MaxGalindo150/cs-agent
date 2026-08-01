@@ -268,6 +268,74 @@ async def test_hits_iteration_limit_guardrail() -> None:
     assert len(client.messages.calls) == 3
 
 
+async def test_lead_in_text_before_a_tool_call_becomes_its_own_segment() -> None:
+    """Regression: the model can talk before it acts ("Voy a escalar esto...")
+    in the same response that asks for a tool. That text must not be dropped
+    (it used to be — only the final no-tool-call response set `reply`) nor
+    merged with the tool group — it is its own segment, in order, so a client
+    can render the tool activity between the two sentences instead of
+    hoisting it above both."""
+
+    async def escalate() -> str:
+        return "flagged"
+
+    reg = ToolRegistry()
+    _register(reg, "escalate_to_human", escalate)
+
+    client = FakeClient(
+        [
+            _msg(
+                _text("Voy a escalar tu solicitud."),
+                _tool_use("escalate_to_human", {}, "toolu_1"),
+                stop_reason="tool_use",
+            ),
+            _msg(_text("Listo, ya quedó registrada.")),
+        ]
+    )
+
+    result = await _run(client, "m", "sys", [{"role": "user", "content": "hi"}], reg)
+
+    assert result.reply == "Voy a escalar tu solicitud.\n\nListo, ya quedó registrada."
+    assert result.segments == [
+        {"type": "text", "text": "Voy a escalar tu solicitud."},
+        {
+            "type": "tools",
+            "calls": [
+                {
+                    "tool": "escalate_to_human",
+                    "args": {},
+                    "output": "flagged",
+                    "label": "escalate to human",
+                }
+            ],
+        },
+        {"type": "text", "text": "Listo, ya quedó registrada."},
+    ]
+
+
+async def test_a_tool_only_response_produces_no_empty_lead_in_segment() -> None:
+    """The common case (no lead-in text) must not grow a spurious empty text
+    segment — only a "tools" segment, exactly like before this feature."""
+
+    async def add(a: int, b: int) -> str:
+        return str(a + b)
+
+    reg = ToolRegistry()
+    _register(reg, "add", add)
+
+    client = FakeClient(
+        [
+            _msg(_tool_use("add", {"a": 2, "b": 3}, "toolu_1"), stop_reason="tool_use"),
+            _msg(_text("5")),
+        ]
+    )
+
+    result = await _run(client, "m", "sys", [{"role": "user", "content": "hi"}], reg)
+
+    assert result.reply == "5"
+    assert [seg["type"] for seg in result.segments] == ["tools", "text"]
+
+
 async def test_ctx_threads_through_to_an_identity_gated_tool() -> None:
     """The loop never inspects ``ctx`` — it only forwards whatever the caller
     passed straight into ``tools.execute``. Regression guard for "identity

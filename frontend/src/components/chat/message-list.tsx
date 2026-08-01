@@ -22,15 +22,17 @@ const SUGGESTIONS = [
 export function MessageList({ messages, onSuggestion }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Re-run on every content change so the view tracks the streaming reply.
-  // Activity steps count too: they render before the first token, so without
-  // them the timeline would appear below the fold on a long transcript.
+  // Re-run whenever the last message's parts grow (a new delta, a new tool
+  // group) so the view tracks the streaming reply — steps included, since
+  // they render as soon as a tool starts, before any text arrives.
   const last = messages[messages.length - 1];
-  const lastContent = last?.content;
-  const lastSteps = last?.steps?.length ?? 0;
+  const lastPartCount = last?.parts.length ?? 0;
+  const lastPart = last?.parts[last.parts.length - 1];
+  const lastPartSize =
+    lastPart?.type === "text" ? lastPart.text.length : (lastPart?.steps.length ?? 0);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, lastContent, lastSteps]);
+  }, [messages.length, lastPartCount, lastPartSize]);
 
   if (messages.length === 0) {
     return <EmptyState onSuggestion={onSuggestion} />;

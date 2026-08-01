@@ -182,6 +182,64 @@ async def test_start_session_without_a_principal_leaves_user_id_null(
     assert row.user_id is None
 
 
+async def test_meta_carries_the_ordered_text_and_tool_segments(
+    database: Database,
+) -> None:
+    """A client reloading this thread needs to know WHERE the tool call sat
+    relative to the two sentences, not just that it happened — that's what
+    `meta["segments"]` is for (frontend/src/lib/chat/types.ts::MessagePart)."""
+
+    async def lookup_order(order_id: str) -> str:
+        return f"order {order_id}: delivered"
+
+    tools = ToolRegistry()
+    tools.register(
+        Tool(
+            name="lookup_order",
+            description="look up an order by id",
+            input_schema=_ORDER_SCHEMA,
+            fn=lookup_order,
+        )
+    )
+    client = ScriptedClient(
+        [
+            response(
+                [text_block('{"retrieve": false, "query": "", "reason": "test"}')]
+            ),
+            response(
+                [
+                    text_block("Let me check that."),
+                    tool_block("lookup_order", {"order_id": "7"}),
+                ],
+                "tool_use",
+            ),
+            response([text_block("It was delivered.")]),
+        ]
+    )
+    agent = make_agent(database, client, tools=tools)
+    session_id = await _new_session(database)
+
+    await agent.respond(session_id, "where is order 7?")
+
+    meta = await _assistant_meta(database, session_id)
+    assert meta is not None
+    assert meta["segments"] == [
+        {"type": "text", "text": "Let me check that."},
+        {
+            "type": "tools",
+            "calls": [
+                {
+                    "tool": "lookup_order",
+                    "args": {"order_id": "7"},
+                    "output": "order 7: delivered",
+                    "label": "lookup order",
+                }
+            ],
+        },
+        {"type": "text", "text": "It was delivered."},
+    ]
+
+
 async def test_an_escalated_session_short_circuits_the_llm_entirely(
     database: Database,
 ) -> None:
@@ -217,3 +275,20 @@ async def test_an_escalated_sessions_message_is_still_persisted(
         messages = await SessionRepository(session).list_messages(session_id)
     contents = [m.content for m in messages if m.role == "user"]
     assert "otro mensaje después de escalar" in contents
+
+
+async def test_the_escalated_short_circuits_meta_also_carries_a_segment(
+    database: Database,
+) -> None:
+    """The canned reply renders the same way a normal turn's does — a single
+    text segment — so the client needs no special case for it."""
+    session_id = await _new_session(database)
+    async with database.session() as session:
+        await SessionRepository(session).mark_escalated(session_id, "test reason")
+    agent = make_agent(database, ScriptedClient([]))
+
+    result = await agent.respond(session_id, "¿ya me reembolsaron?")
+
+    meta = await _assistant_meta(database, session_id)
+    assert meta is not None
+    assert meta["segments"] == [{"type": "text", "text": result.reply}]

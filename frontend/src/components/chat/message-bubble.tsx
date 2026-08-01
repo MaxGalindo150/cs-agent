@@ -7,38 +7,47 @@ interface MessageBubbleProps {
 }
 
 /** A single chat turn. User messages are right-aligned bubbles; assistant
- *  messages flow full-width (no bubble) like ChatGPT / Claude.ai. */
+ *  messages flow full-width (no bubble) like ChatGPT / Claude.ai.
+ *
+ *  An assistant turn renders its `parts` in the order they happened — text,
+ *  then a tool's activity, then more text — rather than hoisting every tool
+ *  call above the whole reply. That is what lets "I'll escalate this" ->
+ *  [escalating…] -> "Done" read as one sequence instead of the agent
+ *  seemingly talking to itself. */
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
-  const isEmptyStreaming = message.streaming && message.content.length === 0;
 
   if (isUser) {
+    const text = message.parts.find((p) => p.type === "text")?.text ?? "";
     return (
       <div className="flex w-full justify-end">
-        <div className="max-w-[75%] rounded-2xl bg-zinc-100 px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap text-zinc-900">
-          {message.content}
+        <div className="max-w-[75%] rounded-2xl bg-zinc-800/60 px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap text-zinc-100 shadow-md shadow-black/20 ring-1 ring-white/10 backdrop-blur-sm">
+          {text}
         </div>
       </div>
     );
   }
 
-  const hasSteps = (message.steps?.length ?? 0) > 0;
+  const isEmptyStreaming = message.streaming && message.parts.length === 0;
+  const lastIndex = message.parts.length - 1;
 
   return (
     <div className="w-full text-zinc-200">
-      {hasSteps && (
-        <ToolActivity steps={message.steps ?? []} streaming={message.streaming} />
-      )}
-
-      {/* Once activity is on screen there is something to look at, so the
-          typing dots would just be noise stacked under it. */}
       {isEmptyStreaming ? (
-        hasSteps ? null : (
-          <TypingDots />
-        )
+        <TypingDots />
       ) : (
         <>
-          <Markdown>{message.content}</Markdown>
+          {message.parts.map((part, i) =>
+            part.type === "steps" ? (
+              <ToolActivity
+                key={i}
+                steps={part.steps}
+                streaming={message.streaming && i === lastIndex}
+              />
+            ) : (
+              <Markdown key={i}>{part.text}</Markdown>
+            ),
+          )}
           {message.streaming && <StreamingCursor />}
         </>
       )}
