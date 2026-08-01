@@ -113,18 +113,23 @@ class Settings(BaseSettings):
     # exchanges (2 messages each) unconsolidated. Mirrors waku's
     # WAKU_CONSOLIDATE_EVERY default (6) — enough context for the summarizer
     # to extract something worth keeping, not so much it runs every turn.
-    consolidate_every: int = Field(default=6, alias="CONSOLIDATE_EVERY")
+    consolidate_every: int = Field(default=6, ge=1, alias="CONSOLIDATE_EVERY")
 
     # Cap on how many due users a single sweep takes on. Bounds one call to
     # POST /internal/consolidate to a predictable duration regardless of how
     # large the backlog grows — the rest wait for the next periodic trigger.
-    consolidate_batch_size: int = Field(default=50, alias="CONSOLIDATE_BATCH_SIZE")
+    consolidate_batch_size: int = Field(
+        default=50, gt=0, alias="CONSOLIDATE_BATCH_SIZE"
+    )
 
     # How many users' consolidation runs concurrently within a sweep. Bounded
     # well under the DB pool (pool_size + max_overflow, agent/memory/db.py)
     # and a conservative guess at Anthropic per-account rate limits — tune up
-    # once real limits are known.
-    consolidate_concurrency: int = Field(default=5, alias="CONSOLIDATE_CONCURRENCY")
+    # once real limits are known. Must be >0: asyncio.Semaphore(0) would
+    # never release and hang every sweep forever.
+    consolidate_concurrency: int = Field(
+        default=5, gt=0, alias="CONSOLIDATE_CONCURRENCY"
+    )
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

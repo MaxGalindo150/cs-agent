@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import anthropic
@@ -29,6 +30,17 @@ from agent.memory.repositories import (
     FactRepository,
     SessionRepository,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ConsolidationResult:
+    """What one user's consolidation pass wrote — 0/0 covers "not due yet",
+    "nothing worth keeping", and "summarizer failed" alike (see
+    ``consolidate_user_if_due``)."""
+
+    facts: int = 0
+    episodes: int = 0
+
 
 SUMMARIZER_PROMPT = """\
 You distill a customer support conversation into long-term memory about the customer.
@@ -52,21 +64,21 @@ async def consolidate_user_if_due(
     fast_model: str,
     every_n: int,
     user_id: str,
-) -> int:
+) -> ConsolidationResult:
     """Consolidate one user's unconsolidated messages, if there are enough.
 
-    Returns how many new facts were written. ``0`` covers three cases the
-    caller cannot (and needn't) tell apart — not due yet, nothing worth
-    keeping, or the summarizer failed — because in every case the messages
-    stay unconsolidated and are retried on the next sweep; nothing is ever
-    lost.
+    Returns how many new facts/episodes were written. ``ConsolidationResult()``
+    (0/0) covers three cases the caller cannot (and needn't) tell apart — not
+    due yet, nothing worth keeping, or the summarizer failed — because in
+    every case the messages stay unconsolidated and are retried on the next
+    sweep; nothing is ever lost.
     """
     async with db.session() as session:
         messages = await SessionRepository(session).list_unconsolidated_for_user(
             user_id
         )
     if len(messages) < every_n * 2:  # each exchange = 2 rows (user + assistant)
-        return 0
+        return ConsolidationResult()
 
     log = "\n".join(f"{m.role}: {m.content}" for m in messages)
     try:
@@ -77,13 +89,23 @@ async def consolidate_user_if_due(
         )
         text = "".join(b.text for b in response.content if isinstance(b, TextBlock))
         distilled = json.loads(text[text.index("{") : text.rindex("}") + 1])
+        facts = distilled.get("facts", [])
+        episode = distilled.get("episode")
+        if not isinstance(facts, list) or not all(isinstance(f, dict) for f in facts):
+            raise ValueError("malformed 'facts' shape")
+        if episode is not None and not isinstance(episode, str):
+            raise ValueError("malformed 'episode' shape")
     except (anthropic.APIError, ValueError, json.JSONDecodeError):
-        return 0  # never lose the log — it stays unconsolidated for next time
+        # Treated the same as invalid JSON — an unusable shape is as
+        # unusable as unparseable text, and must not abort the rest of the
+        # sweep (this only affects the one user whose response is bad).
+        return ConsolidationResult()  # never lose the log — retried next time
 
     new_facts = 0
+    new_episodes = 0
     async with db.session() as session:
         fact_repo = FactRepository(session)
-        for fact in distilled.get("facts", []):
+        for fact in facts:
             if fact.get("subject") and fact.get("content"):
                 await fact_repo.add(
                     fact["subject"],
@@ -92,13 +114,14 @@ async def consolidate_user_if_due(
                     user_id=user_id,
                 )
                 new_facts += 1
-        if distilled.get("episode"):
+        if episode:
             await EpisodeRepository(session).add(
-                datetime.now(UTC), distilled["episode"], user_id=user_id
+                datetime.now(UTC), episode, user_id=user_id
             )
+            new_episodes += 1
         await SessionRepository(session).mark_consolidated([m.id for m in messages])
 
-    return new_facts
+    return ConsolidationResult(facts=new_facts, episodes=new_episodes)
 
 
 async def consolidate_all_due_users(
@@ -108,7 +131,7 @@ async def consolidate_all_due_users(
     every_n: int,
     batch_size: int,
     max_concurrency: int,
-) -> dict[str, int]:
+) -> dict[str, ConsolidationResult]:
     """Sweep users with pending unconsolidated messages, oldest-waiting first.
 
     Bounded on two axes so one sweep can never blow up into an
@@ -133,12 +156,12 @@ async def consolidate_all_due_users(
 
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    async def _bounded(user_id: str) -> tuple[str, int]:
+    async def _bounded(user_id: str) -> tuple[str, ConsolidationResult]:
         async with semaphore:
-            new_facts = await consolidate_user_if_due(
+            result = await consolidate_user_if_due(
                 db, client, fast_model, every_n, user_id
             )
-        return user_id, new_facts
+        return user_id, result
 
     results = await asyncio.gather(*(_bounded(user_id) for user_id in user_ids))
     return dict(results)

@@ -62,7 +62,7 @@ async def test_consolidate_endpoint_sweeps_due_users(
     )
 
     assert resp.status_code == 200
-    assert resp.json() == {"usr_alice": 1}
+    assert resp.json() == {"usr_alice": {"facts": 1, "episodes": 1}}
     async with database.session() as session:
         facts = await FactRepository(session).list_by_subject(
             "plan", user_id="usr_alice"

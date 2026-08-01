@@ -18,6 +18,7 @@ import anthropic
 from anthropic.types import Message
 
 from agent.memory.consolidation import (
+    ConsolidationResult,
     consolidate_all_due_users,
     consolidate_user_if_due,
 )
@@ -86,11 +87,11 @@ async def test_below_threshold_does_nothing_and_never_calls_the_model(
     await _seed_exchanges(database, chat, n=2)  # every_n=6 needs 6
     client = _client([])  # would raise "ran out of scripted responses"
 
-    new_facts = await consolidate_user_if_due(
+    result = await consolidate_user_if_due(
         database, client, "fast-model", 6, "usr_alice"
     )
 
-    assert new_facts == 0
+    assert result == ConsolidationResult()
     async with database.session() as session:
         assert (
             await SessionRepository(session).list_unconsolidated_for_user("usr_alice")
@@ -105,11 +106,11 @@ async def test_at_threshold_writes_facts_episode_and_marks_consolidated(
     await _seed_exchanges(database, chat, n=6)
     client = _client([response([text_block(_DISTILLED)])])
 
-    new_facts = await consolidate_user_if_due(
+    result = await consolidate_user_if_due(
         database, client, "fast-model", 6, "usr_alice"
     )
 
-    assert new_facts == 1
+    assert result == ConsolidationResult(facts=1, episodes=1)
     async with database.session() as session:
         facts = await FactRepository(session).list_by_subject(
             "plan", user_id="usr_alice"
@@ -135,16 +136,39 @@ async def test_malformed_response_leaves_the_log_unconsolidated(
     await _seed_exchanges(database, chat, n=6)
     client = _client([response([text_block("not json at all")])])
 
-    new_facts = await consolidate_user_if_due(
+    result = await consolidate_user_if_due(
         database, client, "fast-model", 6, "usr_alice"
     )
 
-    assert new_facts == 0
+    assert result == ConsolidationResult()
     async with database.session() as session:
         pending = await SessionRepository(session).list_unconsolidated_for_user(
             "usr_alice"
         )
         assert len(pending) == 12  # 6 exchanges * 2 messages, untouched
+
+
+async def test_malformed_shape_leaves_the_log_unconsolidated(
+    database: Database,
+) -> None:
+    """Valid JSON with the wrong shape (facts not a list, episode not a
+    string) must be treated the same as unparseable JSON — one bad response
+    fails only this user, not the whole sweep (asyncio.gather would
+    otherwise propagate an uncaught AttributeError/TypeError)."""
+    chat = await _new_session(database, user_id="usr_alice")
+    await _seed_exchanges(database, chat, n=6)
+    client = _client([response([text_block('{"facts": "not a list", "episode": 42}')])])
+
+    result = await consolidate_user_if_due(
+        database, client, "fast-model", 6, "usr_alice"
+    )
+
+    assert result == ConsolidationResult()
+    async with database.session() as session:
+        pending = await SessionRepository(session).list_unconsolidated_for_user(
+            "usr_alice"
+        )
+        assert len(pending) == 12  # untouched, retried next sweep
 
 
 async def test_consolidate_all_due_users_sweeps_independently(
@@ -160,7 +184,10 @@ async def test_consolidate_all_due_users_sweeps_independently(
         database, client, "fast-model", 6, batch_size=50, max_concurrency=5
     )
 
-    assert results == {"usr_alice": 1, "usr_bob": 0}
+    assert results == {
+        "usr_alice": ConsolidationResult(facts=1, episodes=1),
+        "usr_bob": ConsolidationResult(),
+    }
 
 
 async def test_consolidate_all_due_users_skips_anonymous_sessions(
