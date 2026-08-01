@@ -77,8 +77,7 @@ class Session:
         """
         if self.memory is not None and await self.memory.is_escalated(self.session_id):
             return (
-                "This conversation was already flagged for a human agent, "
-                "who will follow up shortly — no need to escalate it again."
+                "Hola, veo que tu caso ya ha sido escalado a un agente humano. Gracias por tu paciencia mientras nuestro equipo revisa tu solicitud."
             )
         return None
 
