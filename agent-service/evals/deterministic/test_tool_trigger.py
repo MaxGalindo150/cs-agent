@@ -36,13 +36,13 @@ DATASET = [
 @pytest.mark.skipif(not HAS_KEY, reason="live eval needs a real ANTHROPIC_API_KEY")
 @pytest.mark.parametrize("case", DATASET, ids=[c["id"] for c in DATASET])
 async def test_dataset_case(case: dict[str, Any], database: Database) -> None:
-    agent = make_agent_live(database)
     principal = None
     if "principal_scenario" in case:
         principal = Principal(user_id=resolve_demo_user(case["principal_scenario"]))
 
-    session_id = await agent.start_session("eval", principal=principal)
-    result = await agent.respond(session_id, case["input"], principal=principal)
+    async with make_agent_live(database) as agent:
+        session_id = await agent.start_session("eval", principal=principal)
+        result = await agent.respond(session_id, case["input"], principal=principal)
     fired = [c["tool"] for c in result.tool_calls]
 
     if case["expect_tool"] is None:

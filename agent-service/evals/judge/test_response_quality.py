@@ -55,6 +55,13 @@ def no_unbacked_promises_metric() -> GEval:
         evaluation_params=[SingleTurnParams.INPUT, SingleTurnParams.ACTUAL_OUTPUT],
         model=judge,
         threshold=0.7,
+        # DeepEval 4.1.5's default (True) drives the metric with
+        # run_until_complete() — this test is itself already inside pytest's
+        # running event loop, and nesting one loop inside another raises.
+        # Explicit here rather than relying on the `nest_asyncio` deepeval
+        # happens to pull in, which papers over exactly this and could stop
+        # doing so on a version bump.
+        async_mode=False,
     )
 
 
@@ -64,13 +71,13 @@ async def test_an_uncovered_request_does_not_promise_an_outcome(
     from deepeval import assert_test  # type: ignore[attr-defined]
     from deepeval.test_case import LLMTestCase
 
-    agent = make_agent_live(database)
     user_message = "Hola, quiero cambiar mi email a otro correo"
-    session_id = await agent.start_session("eval")
-
-    result = await agent.respond(session_id, user_message)
+    async with make_agent_live(database) as agent:
+        session_id = await agent.start_session("eval")
+        result = await agent.respond(session_id, user_message)
 
     assert_test(
         LLMTestCase(input=user_message, actual_output=result.reply),
         [no_unbacked_promises_metric],
+        run_async=False,
     )

@@ -10,6 +10,8 @@ Unlike Waku, a turn here always needs Postgres for session state (CLAUDE.md
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 from anthropic import AsyncAnthropic
@@ -28,23 +30,34 @@ HAS_KEY = (
 )
 
 
-def make_agent_live(database: Database) -> Agent:
+@asynccontextmanager
+async def make_agent_live(database: Database) -> AsyncIterator[Agent]:
     """Assemble a real ``Agent`` — the real Anthropic client, the real BNPL
     mock-server, the real tool registry — over the eval Postgres. Calls the
     same ``build_agent`` factory the transport lifespan and ``tests/integration``
     use, so the eval can't drift from how production assembles the ``Agent``.
+
+    An async context manager (not a plain factory) because both clients it
+    opens are otherwise never closed — ``Agent`` doesn't own them, matching
+    how ``service/main.py``'s lifespan is the one that calls
+    ``llm.close()``/``bnpl.aclose()`` in production; here that's this
+    function's job instead, once per eval case.
     """
     settings = get_settings()
     client = AsyncAnthropic(api_key=settings.anthropic_api_key)
     bnpl_client = httpx.AsyncClient(base_url=settings.bnpl_api_url)
-    tools = build_registry(bnpl_client, database)
-    return build_agent(
-        client=client,
-        db=database,
-        tools=tools,
-        chat_model=settings.anthropic_chat_model,
-        fast_model=settings.anthropic_fast_model,
-    )
+    try:
+        tools = build_registry(bnpl_client, database)
+        yield build_agent(
+            client=client,
+            db=database,
+            tools=tools,
+            chat_model=settings.anthropic_chat_model,
+            fast_model=settings.anthropic_fast_model,
+        )
+    finally:
+        await client.close()
+        await bnpl_client.aclose()
 
 
 def resolve_demo_user(scenario_tag: str) -> str:
