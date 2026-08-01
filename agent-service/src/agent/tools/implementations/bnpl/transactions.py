@@ -49,6 +49,11 @@ def make_get_transactions_tool(client: httpx.AsyncClient) -> Tool:
             body = resp.json()
         except json.JSONDecodeError:
             return "Could not look up your transactions (bad response from service)."
+        # resp.json() can decode to any JSON type, not just an object — a
+        # bare list/string/number/null would make body.get() below raise
+        # AttributeError, uncaught by the JSONDecodeError guard above.
+        if not isinstance(body, dict):
+            return "Could not look up your transactions (bad response from service)."
         transactions = body.get("data")
         # Never trust the upstream userId filter alone — verify every
         # transaction actually belongs to the caller before returning any of

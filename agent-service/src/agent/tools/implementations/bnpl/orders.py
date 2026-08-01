@@ -165,14 +165,22 @@ def make_get_order_installments_tool(client: httpx.AsyncClient) -> Tool:
                 f"Could not look up installments for order '{order_id}' "
                 "(bad response from service)."
             )
-        installments = body.get("data", [])
+        # resp.json() can decode to any JSON type, not just an object — guard
+        # before calling .get()/indexing, or a bare list/string/number/null
+        # response would raise instead of returning the honest message below.
+        installments = body.get("data") if isinstance(body, dict) else None
         # Every installment carries its own userId (mock-server/src/schema/
         # installment.ts), generated for the same order/user by construction
         # — checking it enforces "id + owner, one check" without a second
         # round trip to fetch the order itself. An order with zero
         # installments can't be proven to belong to the caller, so it's
         # refused the same as a 404 rather than returned unchecked.
-        if not installments or installments[0].get("userId") != ctx.principal.user_id:
+        if (
+            not isinstance(installments, list)
+            or not installments
+            or not isinstance(installments[0], dict)
+            or installments[0].get("userId") != ctx.principal.user_id
+        ):
             return f"No order found with id '{order_id}'."
         return resp.text
 
@@ -265,11 +273,20 @@ def make_get_my_orders_tool(client: httpx.AsyncClient) -> Tool:
             body = resp.json()
         except json.JSONDecodeError:
             return "Could not look up your orders (bad response from service)."
+        # resp.json() can decode to any JSON type, not just an object — guard
+        # before calling .get()/indexing, or a bare list/string/number/null
+        # response would raise instead of returning the honest message below.
+        if not isinstance(body, dict):
+            return "Could not look up your orders (bad response from service)."
 
         orders = body.get("data", [])
+        if not isinstance(orders, list) or any(
+            not isinstance(order, dict) for order in orders
+        ):
+            return "Could not look up your orders (bad response from service)."
         summaries = await asyncio.gather(
             *(
-                _shipment_summary(client, order["id"], ctx.principal.user_id)
+                _shipment_summary(client, order.get("id", ""), ctx.principal.user_id)
                 for order in orders
             )
         )

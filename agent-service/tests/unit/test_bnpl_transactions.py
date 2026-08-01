@@ -96,6 +96,29 @@ async def test_get_transactions_refuses_a_leaked_transaction() -> None:
     assert "bad response from service" in out
 
 
+async def test_get_transactions_refuses_a_non_dict_top_level_body() -> None:
+    """resp.json() can decode to any JSON type — a bare list or null must
+    not reach body.get() and raise AttributeError."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    async with _client(handle) as client:
+        out = await make_get_transactions_tool(client).fn(_ALICE)
+
+    assert "bad response from service" in out
+
+
+async def test_get_transactions_refuses_a_null_top_level_body() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"null")
+
+    async with _client(handle) as client:
+        out = await make_get_transactions_tool(client).fn(_ALICE)
+
+    assert "bad response from service" in out
+
+
 async def test_get_transactions_refuses_when_data_is_not_a_list() -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"data": "not a list", "total": 1})
