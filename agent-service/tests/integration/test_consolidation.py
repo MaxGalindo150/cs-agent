@@ -171,6 +171,33 @@ async def test_malformed_shape_leaves_the_log_unconsolidated(
         assert len(pending) == 12  # untouched, retried next sweep
 
 
+async def test_non_string_fact_fields_are_skipped_not_persisted(
+    database: Database,
+) -> None:
+    """A dict-shaped fact with a non-string subject/content (e.g. the LLM
+    hallucinates a number) is silently skipped, not written to a repository
+    that expects ``str`` — unlike a malformed container shape, a valid
+    container with one bad item doesn't fail the whole response."""
+    chat = await _new_session(database, user_id="usr_alice")
+    await _seed_exchanges(database, chat, n=6)
+    client = _client(
+        [response([text_block('{"facts": [{"subject": 1, "content": "x"}]}')])]
+    )
+
+    result = await consolidate_user_if_due(
+        database, client, "fast-model", 6, "usr_alice"
+    )
+
+    assert result == ConsolidationResult()
+    async with database.session() as session:
+        assert await FactRepository(session).search("x", user_id="usr_alice") == []
+        # container shape was valid, so the log is still marked consolidated
+        assert (
+            await SessionRepository(session).list_unconsolidated_for_user("usr_alice")
+            == []
+        )
+
+
 async def test_consolidate_all_due_users_sweeps_independently(
     database: Database,
 ) -> None:

@@ -106,10 +106,22 @@ async def consolidate_user_if_due(
     async with db.session() as session:
         fact_repo = FactRepository(session)
         for fact in facts:
-            if fact.get("subject") and fact.get("content"):
+            subject = fact.get("subject")
+            content = fact.get("content")
+            # isinstance, not just truthy — a dict shape is already confirmed
+            # above, but subject/content could still be a non-string truthy
+            # value (an int, a list); FactRepository.add expects str, and
+            # this loop runs outside the parse try/except, so a bad value
+            # here would otherwise crash the whole sweep, not just this user.
+            if (
+                isinstance(subject, str)
+                and isinstance(content, str)
+                and subject
+                and content
+            ):
                 await fact_repo.add(
-                    fact["subject"],
-                    fact["content"],
+                    subject,
+                    content,
                     source="consolidation",
                     user_id=user_id,
                 )
