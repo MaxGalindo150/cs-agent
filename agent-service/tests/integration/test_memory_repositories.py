@@ -7,6 +7,7 @@ FK cascade. Deterministic and hermetic — no LLM, no network beyond the DB.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 
 import pytest
@@ -258,8 +259,6 @@ async def test_sessions_are_listed_most_recently_active_first(
 async def test_get_session_returns_none_when_absent(
     db_session: AsyncSession,
 ) -> None:
-    import uuid
-
     assert await SessionRepository(db_session).get_session(uuid.uuid4()) is None
 
 
@@ -283,6 +282,63 @@ async def test_create_session_without_a_user_id_defaults_to_null(
     chat = await SessionRepository(db_session).create_session(title="anonimo")
 
     assert chat.user_id is None
+
+
+async def test_mark_escalated_sets_the_reason_and_timestamp(
+    database: Database,
+) -> None:
+    # Separate session scopes on purpose (unlike most of this file's
+    # db_session-based tests): a bulk UPDATE (mark_escalated) expires the
+    # matching row in whatever session issued it, and re-reading via .get()
+    # in that same session needs a sync lazy-refresh SQLAlchemy's async ORM
+    # can't do outside an awaited call — the same "never hold a session
+    # across a boundary" shape as CLAUDE.md §3's DB-connection rule, just
+    # surfacing here as a test-construction detail instead of a request-path
+    # rule. A fresh session per phase is how production always reads this
+    # back anyway (agent/memory/__init__.py::Memory.is_escalated).
+    async with database.session() as session:
+        chat = await SessionRepository(session).create_session(user_id="usr_alice")
+    async with database.session() as session:
+        changed = await SessionRepository(session).mark_escalated(
+            chat.id, "duplicate payment, refund needed"
+        )
+    assert changed is True
+
+    async with database.session() as session:
+        reloaded = await SessionRepository(session).get_session(chat.id)
+    assert reloaded is not None
+    assert reloaded.escalated_at is not None
+    assert reloaded.escalation_reason == "duplicate payment, refund needed"
+
+
+async def test_mark_escalated_is_idempotent(database: Database) -> None:
+    """A second escalation must not overwrite the first reason — the return
+    value alone tells the caller nothing changed."""
+    async with database.session() as session:
+        chat = await SessionRepository(session).create_session(user_id="usr_alice")
+    async with database.session() as session:
+        await SessionRepository(session).mark_escalated(chat.id, "first reason")
+
+    async with database.session() as session:
+        changed_again = await SessionRepository(session).mark_escalated(
+            chat.id, "second reason"
+        )
+    assert changed_again is False
+
+    async with database.session() as session:
+        reloaded = await SessionRepository(session).get_session(chat.id)
+    assert reloaded is not None
+    assert reloaded.escalation_reason == "first reason"
+
+
+async def test_mark_escalated_on_an_unknown_session_is_a_no_op(
+    db_session: AsyncSession,
+) -> None:
+    changed = await SessionRepository(db_session).mark_escalated(
+        uuid.uuid4(), "orphan reason"
+    )
+
+    assert changed is False
 
 
 # --- facts (semantic memory) -----------------------------------------------

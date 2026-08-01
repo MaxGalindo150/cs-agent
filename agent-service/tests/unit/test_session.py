@@ -18,6 +18,17 @@ from agent.app import AgentConfig
 from agent.runtime.session import Session
 
 
+class _StubMemory:
+    """Just enough of the ``Memory`` facade for ``fixed_response`` — it only
+    ever calls ``is_escalated``."""
+
+    def __init__(self, escalated: bool) -> None:
+        self._escalated = escalated
+
+    async def is_escalated(self, session_id: uuid.UUID) -> bool:
+        return self._escalated
+
+
 async def test_system_prompt_includes_a_clock_with_hh_mm() -> None:
     # Regression net from Waku: the model had the date but not the time and asked
     # the user "what time is it?" before scheduling "in 30 minutes". The system
@@ -59,3 +70,24 @@ def test_default_history_window_is_generous_but_finite() -> None:
     # eventual context-limit break). The knob now lives on AgentConfig, injected
     # into Session.switch, defaulting to 12 turns.
     assert AgentConfig(model="test-model").history_turns == 12
+
+
+async def test_fixed_response_is_none_without_memory() -> None:
+    session = Session(uuid.uuid4(), memory=None)
+    assert await session.fixed_response("hola") is None
+
+
+async def test_fixed_response_is_none_when_not_escalated() -> None:
+    session = Session(uuid.uuid4(), memory=_StubMemory(escalated=False))
+    assert await session.fixed_response("hola") is None
+
+
+async def test_fixed_response_short_circuits_an_escalated_session() -> None:
+    """The deterministic gate: an escalated session gets a canned reply, no
+    matter what the user says — never a fresh model-generated promise."""
+    session = Session(uuid.uuid4(), memory=_StubMemory(escalated=True))
+
+    fixed = await session.fixed_response("¿ya me van a reembolsar?")
+
+    assert fixed is not None
+    assert "human agent" in fixed.lower()

@@ -32,6 +32,10 @@ How you work:
   there, say so plainly or ask the customer for what you need (e.g. the order id).
 - Relay tool results honestly: state what you actually found or did, never a
   status, amount, or action the tool output doesn't support.
+- Never promise an action you have no tool for (a refund, a manual account
+  fix, anything you can't verify or resolve yourself) — call
+  escalate_to_human and tell the customer a person will follow up, without
+  promising what they'll do or when.
 
 Your tools' descriptions say what each one does and when to use it. Detailed
 procedures for specific situations arrive as skill instructions when they apply.
@@ -57,6 +61,26 @@ class Session:
         self.session_id = session_id
         self.memory = memory  # agent.memory.Memory (None until it's wired)
         self.history: list[dict[str, Any]] = []
+
+    async def fixed_response(self, user_message: str) -> str | None:
+        """A canned reply that must bypass the LLM entirely, or ``None`` if
+        this turn should run normally.
+
+        Each check here is a deterministic harness guarantee, not something
+        the model re-decides every turn — once a session is escalated, the
+        model must never get another chance to promise something it can't
+        back (this is what prompted the check: an agent that had already
+        escalated a duplicate charge kept offering to "process the refund"
+        on the next message). Sequential checks, not a plugin registry — a
+        future case (e.g. a bare greeting) is just another early return
+        added here, not a redesign.
+        """
+        if self.memory is not None and await self.memory.is_escalated(self.session_id):
+            return (
+                "This conversation was already flagged for a human agent, "
+                "who will follow up shortly — no need to escalate it again."
+            )
+        return None
 
     async def build_system(
         self,

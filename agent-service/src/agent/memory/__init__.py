@@ -185,3 +185,12 @@ class Memory:
                 }
                 for s in sessions
             ]
+
+    async def is_escalated(self, session_id: uuid.UUID) -> bool:
+        """Whether this session was already flagged for a human — read by
+        ``agent.runtime.session.Session.fixed_response`` to short-circuit the
+        LLM entirely once escalated. An unknown session id reads as
+        not-escalated (nothing to short-circuit for)."""
+        async with self._db.session() as session:
+            row = await SessionRepository(session).get_session(session_id)
+            return row is not None and row.escalated_at is not None

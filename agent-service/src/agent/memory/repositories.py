@@ -55,6 +55,22 @@ class SessionRepository:
     async def get_session(self, session_id: uuid.UUID) -> ChatSession | None:
         return await self._db.get(ChatSession, session_id)
 
+    async def mark_escalated(self, session_id: uuid.UUID, reason: str) -> bool:
+        """Flag a session for human follow-up. Idempotent: only writes if not
+        already escalated (the ``WHERE`` guards it), so a tool can tell the
+        model "already escalated" from the return value alone, with no
+        separate read. Returns ``False`` for an unknown session id too —
+        there's no row to match either way."""
+        result = await self._db.execute(
+            update(ChatSession)
+            .where(
+                ChatSession.id == session_id,
+                ChatSession.escalated_at.is_(None),
+            )
+            .values(escalated_at=func.now(), escalation_reason=reason)
+        )
+        return cast(CursorResult[Any], result).rowcount > 0
+
     async def list_sessions(self, limit: int = 50) -> list[ChatSession]:
         """Most recently active first — the order a chat sidebar wants."""
         result = await self._db.execute(
