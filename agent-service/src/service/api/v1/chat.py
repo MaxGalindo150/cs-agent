@@ -37,6 +37,12 @@ _TITLE_CHARS = 120
 # error mid-turn (CLAUDE.md §6 — pydantic validation at every boundary).
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _MAX_IMAGES_PER_TURN = 4
+# Base64 inflates by 4/3 (rounded up to the next multiple of 4): the longest
+# `data` string that can possibly decode to _MAX_IMAGE_BYTES or fewer bytes.
+# Checked as a cheap Field(max_length=...) BEFORE base64.b64decode ever runs —
+# without it, an attacker-supplied multi-GB `data` string gets fully decoded
+# (real memory/CPU spent) before the byte-count check below ever rejects it.
+_MAX_IMAGE_BASE64_CHARS = 4 * ((_MAX_IMAGE_BYTES + 2) // 3)
 
 
 def session_title(message: str) -> str:
@@ -66,7 +72,7 @@ class ImageInput(BaseModel):
     image is ever persisted."""
 
     media_type: Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
-    data: str = Field(min_length=1)
+    data: str = Field(min_length=1, max_length=_MAX_IMAGE_BASE64_CHARS)
 
     @field_validator("data")
     @classmethod

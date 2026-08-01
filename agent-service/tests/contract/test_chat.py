@@ -183,6 +183,32 @@ async def test_chat_rejects_an_oversized_image(chat_client: httpx.AsyncClient) -
     assert resp.status_code == 422
 
 
+async def test_chat_rejects_a_data_string_longer_than_the_base64_cap(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    """`Field(max_length=_MAX_IMAGE_BASE64_CHARS)` must reject an oversized
+    `data` string by its encoded length alone, before the field_validator ever
+    calls `base64.b64decode` on it — the fix for a request that could
+    otherwise force a full decode of an attacker-supplied multi-GB string
+    before any size check ran (see _MAX_IMAGE_BASE64_CHARS in
+    service/api/v1/chat.py)."""
+    from service.api.v1.chat import _MAX_IMAGE_BASE64_CHARS
+
+    oversized = "x" * (_MAX_IMAGE_BASE64_CHARS + 1)
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={
+            "message": "hola",
+            "images": [{"media_type": "image/png", "data": oversized}],
+        },
+    )
+
+    assert resp.status_code == 422
+    # Rejected by the length cap itself — the custom base64 validator (whose
+    # errors mention "base64") never even ran.
+    assert "base64" not in resp.text
+
+
 async def test_chat_rejects_a_mismatched_media_type(
     chat_client: httpx.AsyncClient,
 ) -> None:

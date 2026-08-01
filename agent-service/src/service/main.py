@@ -35,6 +35,7 @@ from service.core.agent import (
     build_service_agent,
 )
 from service.core.config import Settings, get_settings
+from service.core.limits import MaxBodySizeMiddleware
 from service.core.llm import build_anthropic_client
 from service.core.migrations import upgrade_to_head
 from service.core.tooling import build_bnpl_client
@@ -141,6 +142,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added last so it wraps everything else (Starlette's stack is LIFO on
+    # add_middleware) — an oversized body 413s before CORS or routing ever run.
+    app.add_middleware(MaxBodySizeMiddleware)
 
     # Provider failures become a clean 502, never a raw stack trace.
     app.add_exception_handler(APIError, handle_provider_error)
