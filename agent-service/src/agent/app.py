@@ -140,6 +140,12 @@ class Agent:
         ``principal`` is the identified end-user this turn is for (or ``None``
         for an anonymous visitor) — wrapped once, here, into the ``ToolContext``
         the loop forwards opaquely to ``ToolRegistry.execute``.
+
+        Before any of that: ``session.fixed_response()`` may short-circuit the
+        whole turn (e.g. an already-escalated session) — the message is still
+        recorded, but the LLM/tools never run and a canned reply goes out
+        instead. See ``agent/runtime/session.py`` for why this must be a
+        harness guarantee, not a prompt instruction the model could ignore.
         """
         captured: dict[str, Any] = {}
 
@@ -152,7 +158,7 @@ class Agent:
 
         notify = compose(observer, self._tracer.event, _capture)
         t0 = time.perf_counter()
-        ctx = ToolContext(principal=principal)
+        ctx = ToolContext(principal=principal, session_id=session_id)
 
         with self._tracer.turn(user_message, session_id=str(session_id)):
             # No held session (unlike Waku): build one per request and load this
@@ -161,6 +167,22 @@ class Agent:
             # lives in the process between requests (CLAUDE.md §9).
             session = Session(session_id, memory=self._memory)
             await session.switch(session_id, self._config.history_turns)
+
+            # A deterministic gate, checked before the LLM ever runs: once a
+            # session is escalated (or a future fixed_response case matches),
+            # the model never gets another turn to reason about it — it can't
+            # repeat a promise it can't back. The message is still recorded
+            # (the human agent needs the full transcript), just never sent
+            # to run_loop.
+            fixed = await session.fixed_response(user_message)
+            if fixed is not None:
+                notify("text", {"delta": fixed})
+                await session.add_exchange(
+                    user_message, fixed, source=source, meta={"fixed_response": True}
+                )
+                self._tracer.end_turn(fixed, 0)
+                return LoopResult(reply=fixed, tool_calls=[], iterations=0)
+
             user_id = principal.user_id if principal else None
             system = await session.build_system(user_message, user_id, notify=notify)
 

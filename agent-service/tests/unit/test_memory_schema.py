@@ -74,6 +74,14 @@ def test_episodes_user_id_is_nullable_and_indexed() -> None:
     _assert_user_id_nullable_and_indexed("episodes")
 
 
+def test_chat_sessions_escalation_columns_are_nullable() -> None:
+    """Presence, not a status enum: null = never escalated (agent/tools/
+    implementations/escalation.py)."""
+    table = _table("chat_sessions")
+    assert table.c["escalated_at"].nullable is True
+    assert table.c["escalation_reason"].nullable is True
+
+
 def test_chat_message_guards_role_and_cascades_from_session() -> None:
     table = _table("chat_messages")
     checks = [c for c in table.constraints if isinstance(c, CheckConstraint)]

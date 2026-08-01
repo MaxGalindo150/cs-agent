@@ -68,6 +68,13 @@ class ChatSession(Base):
     last_activity_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # Presence, not a status enum: null = never escalated, non-null = when it
+    # was flagged for a human (agent/tools/implementations/escalation.py).
+    # Once set, agent/runtime/session.py's fixed_response gate short-circuits
+    # the LLM entirely for every later turn in this session — a deterministic
+    # harness guarantee, not something the model re-decides each turn.
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    escalation_reason: Mapped[str | None] = mapped_column(Text)
 
     messages: Mapped[list[ChatMessage]] = relationship(
         back_populates="session",

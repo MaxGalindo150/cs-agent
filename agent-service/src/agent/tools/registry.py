@@ -62,6 +62,13 @@ class Tool:
     ``fn(ctx=ctx, **args)`` instead of ``fn(**args)``. Never exposed in
     ``to_api()``: the model never sees this flag, only its effect."""
 
+    needs_context: bool = False
+    """Like ``requires_identity``, but without the identity requirement: the
+    tool still receives ``fn(ctx=ctx, **args)``, for something else on
+    ``ToolContext`` (e.g. ``session_id``) that an anonymous caller can also
+    have. Set this instead of ``requires_identity`` when a tool needs context
+    but must keep working for a caller with no resolved ``Principal``."""
+
     def to_api(self) -> dict[str, Any]:
         """The shape the Messages API expects in its `tools=` parameter."""
         return {
@@ -149,7 +156,7 @@ class ToolRegistry:
                 "available for this conversation."
             )
         try:
-            if tool.requires_identity:
+            if tool.requires_identity or tool.needs_context:
                 return await tool.fn(ctx=ctx, **args)
             return await tool.fn(**args)
         except Exception as exc:  # surface, don't crash — the model can retry

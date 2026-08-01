@@ -180,3 +180,40 @@ async def test_start_session_without_a_principal_leaves_user_id_null(
         row = await SessionRepository(session).get_session(session_id)
     assert row is not None
     assert row.user_id is None
+
+
+async def test_an_escalated_session_short_circuits_the_llm_entirely(
+    database: Database,
+) -> None:
+    """Once escalated, respond() must never call the LLM again — a canned
+    reply goes out instead, so the model can never repeat a promise it can't
+    back (agent/runtime/session.py::Session.fixed_response). ScriptedClient([])
+    would raise "ran out of scripted responses" if the loop ran at all."""
+    session_id = await _new_session(database)
+    async with database.session() as session:
+        await SessionRepository(session).mark_escalated(session_id, "test reason")
+    agent = make_agent(database, ScriptedClient([]))
+
+    result = await agent.respond(session_id, "¿ya me reembolsaron?")
+
+    assert result.iterations == 0
+    assert result.tool_calls == []
+    assert "human agent" in result.reply.lower()
+
+
+async def test_an_escalated_sessions_message_is_still_persisted(
+    database: Database,
+) -> None:
+    """The human agent needs the full transcript — the short-circuit skips
+    the LLM, never the persistence of what the customer actually said."""
+    session_id = await _new_session(database)
+    async with database.session() as session:
+        await SessionRepository(session).mark_escalated(session_id, "test reason")
+    agent = make_agent(database, ScriptedClient([]))
+
+    await agent.respond(session_id, "otro mensaje después de escalar")
+
+    async with database.session() as session:
+        messages = await SessionRepository(session).list_messages(session_id)
+    contents = [m.content for m in messages if m.role == "user"]
+    assert "otro mensaje después de escalar" in contents

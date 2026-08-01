@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -13,7 +14,10 @@ _SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
 
 
 def _tool(
-    name: str, fn: Callable[..., Awaitable[str]], requires_identity: bool = False
+    name: str,
+    fn: Callable[..., Awaitable[str]],
+    requires_identity: bool = False,
+    needs_context: bool = False,
 ) -> Tool:
     return Tool(
         name=name,
@@ -21,6 +25,7 @@ def _tool(
         input_schema=_SCHEMA,
         fn=fn,
         requires_identity=requires_identity,
+        needs_context=needs_context,
     )
 
 
@@ -173,6 +178,52 @@ async def test_a_non_identity_tool_ignores_an_unused_context() -> None:
     ctx = ToolContext(principal=Principal(user_id="usr_1"))
 
     assert await reg.execute("echo", {"text": "hi"}, ctx) == "echo:hi"
+
+
+async def test_needs_context_tool_receives_ctx_without_identity() -> None:
+    """Unlike requires_identity, needs_context must not gate on a resolved
+    Principal — it only changes the calling convention (fn gets ctx=ctx),
+    so a tool like escalate_to_human keeps working for an anonymous caller."""
+    seen: list[ToolContext] = []
+
+    async def flag(ctx: ToolContext, reason: str = "") -> str:
+        seen.append(ctx)
+        return f"flagged session {ctx.session_id}"
+
+    reg = ToolRegistry()
+    reg.register(_tool("flag", flag, needs_context=True))
+    ctx = ToolContext(principal=None, session_id=uuid.uuid4())
+
+    out = await reg.execute("flag", {"reason": "x"}, ctx)
+
+    assert out == f"flagged session {ctx.session_id}"
+    assert seen == [ctx]
+
+
+async def test_needs_context_tool_is_not_refused_without_a_principal() -> None:
+    """Only requires_identity refuses execution — needs_context alone must
+    never trigger the identity gate."""
+
+    async def flag(ctx: ToolContext) -> str:
+        return "ran"
+
+    reg = ToolRegistry()
+    reg.register(_tool("flag", flag, needs_context=True))
+
+    out = await reg.execute("flag", {}, None)
+
+    assert out == "ran"
+
+
+def test_schemas_include_needs_context_tools_without_a_principal() -> None:
+    """needs_context is independent of requires_identity — schemas() only
+    gates on the latter, so this tool stays visible to an anonymous turn."""
+    reg = ToolRegistry()
+    reg.register(_tool("flag", _noop, needs_context=True))
+
+    names = {s["name"] for s in reg.schemas()}
+
+    assert names == {"flag"}
 
 
 def test_schemas_expose_the_api_shape() -> None:
