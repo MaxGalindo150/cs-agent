@@ -25,6 +25,15 @@ from service.main import create_app
 
 _SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
+# A real (tiny, 2x2 red) PNG — the magic-number check in
+# ImageInput._validate_base64_and_size rejects anything that doesn't actually
+# look like its declared media_type, so "valid image" test fixtures need real
+# bytes, not an arbitrary base64 string.
+_TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7"
+    "gP9i18U1AAAAABJRU5ErkJggg=="
+)
+
 
 class _FakeAgent:
     def __init__(self) -> None:
@@ -137,12 +146,12 @@ async def test_chat_forwards_a_valid_image_to_respond() -> None:
             "/v1/chat",
             json={
                 "message": "aquí está mi comprobante",
-                "images": [{"media_type": "image/png", "data": "aGVsbG8="}],
+                "images": [{"media_type": "image/png", "data": _TINY_PNG_B64}],
             },
         )
 
     assert resp.status_code == 200
-    assert agent.received_images == [Image(media_type="image/png", data="aGVsbG8=")]
+    assert agent.received_images == [Image(media_type="image/png", data=_TINY_PNG_B64)]
 
 
 async def test_chat_rejects_a_malformed_base64_image(
@@ -174,10 +183,27 @@ async def test_chat_rejects_an_oversized_image(chat_client: httpx.AsyncClient) -
     assert resp.status_code == 422
 
 
+async def test_chat_rejects_a_mismatched_media_type(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    # "hello", base64-encoded, declared as a PNG: valid base64, well under the
+    # size limit, but not remotely a PNG — the magic-number check must catch
+    # a mislabeled (or non-image) payload the earlier checks let through.
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={
+            "message": "hola",
+            "images": [{"media_type": "image/png", "data": "aGVsbG8="}],
+        },
+    )
+
+    assert resp.status_code == 422
+
+
 async def test_chat_rejects_more_images_than_the_per_turn_limit(
     chat_client: httpx.AsyncClient,
 ) -> None:
-    image = {"media_type": "image/png", "data": "aGVsbG8="}
+    image = {"media_type": "image/png", "data": _TINY_PNG_B64}
     resp = await chat_client.post(
         "/v1/chat", json={"message": "hola", "images": [image] * 5}
     )

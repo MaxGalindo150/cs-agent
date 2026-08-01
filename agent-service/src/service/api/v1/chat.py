@@ -15,7 +15,7 @@ from typing import Literal
 
 import structlog
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from agent.app import Agent
 from agent.identity import Principal
@@ -43,6 +43,23 @@ def session_title(message: str) -> str:
     return message[:_TITLE_CHARS]
 
 
+def _matches_media_type(decoded: bytes, media_type: str) -> bool:
+    """A cheap magic-number sniff — not a full image decode, just enough to
+    catch a mislabeled or non-image payload before it reaches the provider
+    (e.g. ``aGVsbG8=`` decoding to the plain bytes ``hello``, declared as
+    ``image/png``, must 422 here rather than surface as an opaque failure
+    partway through a turn)."""
+    if media_type == "image/png":
+        return decoded.startswith(b"\x89PNG\r\n\x1a\n")
+    if media_type == "image/jpeg":
+        return decoded.startswith(b"\xff\xd8\xff")
+    if media_type == "image/gif":
+        return decoded.startswith((b"GIF87a", b"GIF89a"))
+    if media_type == "image/webp":
+        return decoded.startswith(b"RIFF") and decoded[8:12] == b"WEBP"
+    return False  # unreachable: media_type is already a validated Literal
+
+
 class ImageInput(BaseModel):
     """One attached image: base64 data, no ``data:`` URI prefix. Context for
     the turn it arrives in — see ``agent/vision.py`` for why nothing about an
@@ -53,7 +70,7 @@ class ImageInput(BaseModel):
 
     @field_validator("data")
     @classmethod
-    def _validate_base64_and_size(cls, v: str) -> str:
+    def _validate_base64_and_size(cls, v: str, info: ValidationInfo) -> str:
         try:
             decoded = base64.b64decode(v, validate=True)
         except ValueError as exc:
@@ -61,6 +78,12 @@ class ImageInput(BaseModel):
         if len(decoded) > _MAX_IMAGE_BYTES:
             limit_mb = _MAX_IMAGE_BYTES // (1024 * 1024)
             raise ValueError(f"image exceeds the {limit_mb}MB limit")
+        # media_type is declared before data, so it's already validated and
+        # present here — unless it itself failed validation, in which case
+        # that failure is reported on its own and this check is skipped.
+        media_type = info.data.get("media_type")
+        if media_type is not None and not _matches_media_type(decoded, media_type):
+            raise ValueError(f"data does not look like a valid {media_type} image")
         return v
 
     def to_agent_image(self) -> Image:

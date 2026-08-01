@@ -23,10 +23,18 @@ from service.main import create_app
 
 _SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 
+# A real (tiny, 2x2 red) PNG — see tests/contract/test_chat.py for why a
+# "valid image" fixture needs real bytes, not an arbitrary base64 string.
+_TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7"
+    "gP9i18U1AAAAABJRU5ErkJggg=="
+)
+
 
 class _StreamAgent:
     def __init__(self) -> None:
         self.received_principal: Principal | None = None
+        self.received_images: list[Image] | None = None
         self.start_session_principal: Principal | None = None
 
     async def start_session(
@@ -46,6 +54,7 @@ class _StreamAgent:
         images: list[Image] | None = None,
     ) -> LoopResult:
         self.received_principal = principal
+        self.received_images = images
         assert observer is not None
         observer("text", {"delta": "Hola"})
         observer("text", {"delta": " mundo"})
@@ -120,6 +129,30 @@ async def test_chat_stream_forwards_the_resolved_principal_to_respond() -> None:
     expected = Principal(user_id="usr_0001", email="alice@example.com")
     assert agent.received_principal == expected
     assert agent.start_session_principal == expected
+
+
+async def test_chat_stream_forwards_a_valid_image_to_respond() -> None:
+    """Same contract as /v1/chat: an attached image must reach
+    `Agent.respond`, not get dropped by the streaming path's `images=images`
+    wiring in `chat_stream()`."""
+    app = create_app()
+    agent = _StreamAgent()
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        async with c.stream(
+            "POST",
+            "/v1/chat/stream",
+            json={
+                "message": "aquí está mi comprobante",
+                "images": [{"media_type": "image/png", "data": _TINY_PNG_B64}],
+            },
+        ) as resp:
+            assert resp.status_code == 200
+            async for _ in resp.aiter_text():
+                pass
+
+    assert agent.received_images == [Image(media_type="image/png", data=_TINY_PNG_B64)]
 
 
 class _CrashAgent:
