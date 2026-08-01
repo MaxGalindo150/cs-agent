@@ -17,6 +17,7 @@ import pytest
 from agent.identity import Principal
 from agent.loop.agent import LoopResult
 from agent.observability import Observer
+from agent.vision import Image
 from service.core.agent import get_agent
 from service.main import create_app
 
@@ -42,6 +43,7 @@ class _StreamAgent:
         source: str = "api",
         stream: bool = False,
         principal: Principal | None = None,
+        images: list[Image] | None = None,
     ) -> LoopResult:
         self.received_principal = principal
         assert observer is not None
@@ -134,6 +136,7 @@ class _CrashAgent:
         source: str = "api",
         stream: bool = False,
         principal: Principal | None = None,
+        images: list[Image] | None = None,
     ) -> LoopResult:
         raise RuntimeError("sdk blew up")
 
@@ -179,6 +182,7 @@ class _ToolAgent:
         source: str = "api",
         stream: bool = False,
         principal: Principal | None = None,
+        images: list[Image] | None = None,
     ) -> LoopResult:
         assert observer is not None
         observer(

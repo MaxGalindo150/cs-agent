@@ -8,6 +8,7 @@ real Postgres) is covered by ``tests/integration/test_respond.py``.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from collections.abc import AsyncIterator
 
@@ -18,6 +19,7 @@ import pytest
 from agent.identity import Principal
 from agent.loop.agent import LoopResult
 from agent.observability import Observer
+from agent.vision import Image
 from service.core.agent import get_agent
 from service.main import create_app
 
@@ -27,6 +29,7 @@ _SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 class _FakeAgent:
     def __init__(self) -> None:
         self.received_principal: Principal | None = None
+        self.received_images: list[Image] | None = None
         self.start_session_principal: Principal | None = None
 
     async def start_session(
@@ -43,8 +46,10 @@ class _FakeAgent:
         source: str = "api",
         stream: bool = False,
         principal: Principal | None = None,
+        images: list[Image] | None = None,
     ) -> LoopResult:
         self.received_principal = principal
+        self.received_images = images
         return LoopResult(reply="hi from fake", iterations=1)
 
 
@@ -122,6 +127,64 @@ async def test_chat_rejects_empty_message(chat_client: httpx.AsyncClient) -> Non
     assert resp.status_code == 422
 
 
+async def test_chat_forwards_a_valid_image_to_respond() -> None:
+    app = create_app()
+    agent = _FakeAgent()
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post(
+            "/v1/chat",
+            json={
+                "message": "aquí está mi comprobante",
+                "images": [{"media_type": "image/png", "data": "aGVsbG8="}],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert agent.received_images == [Image(media_type="image/png", data="aGVsbG8=")]
+
+
+async def test_chat_rejects_a_malformed_base64_image(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    # Validation at the boundary: bad base64 must 422 before it ever reaches
+    # the LLM call, not surface as an opaque provider error mid-turn.
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={
+            "message": "hola",
+            "images": [{"media_type": "image/png", "data": "not-valid-base64!!!"}],
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_chat_rejects_an_oversized_image(chat_client: httpx.AsyncClient) -> None:
+    oversized = base64.b64encode(b"x" * (5 * 1024 * 1024 + 1)).decode()
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={
+            "message": "hola",
+            "images": [{"media_type": "image/png", "data": oversized}],
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_chat_rejects_more_images_than_the_per_turn_limit(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    image = {"media_type": "image/png", "data": "aGVsbG8="}
+    resp = await chat_client.post(
+        "/v1/chat", json={"message": "hola", "images": [image] * 5}
+    )
+
+    assert resp.status_code == 422
+
+
 class _BoomAgent:
     async def start_session(
         self, title: str | None = None, principal: Principal | None = None
@@ -136,6 +199,7 @@ class _BoomAgent:
         source: str = "api",
         stream: bool = False,
         principal: Principal | None = None,
+        images: list[Image] | None = None,
     ) -> LoopResult:
         raise anthropic.APIError(
             "upstream boom", httpx.Request("POST", "http://test"), body=None

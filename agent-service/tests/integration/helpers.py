@@ -61,8 +61,14 @@ def response(
 class _ScriptedMessages:
     def __init__(self, script: list[Message]) -> None:
         self._script = script
+        self.calls: list[dict[str, Any]] = []
 
     async def create(self, **kwargs: Any) -> Message:
+        # A shallow copy of `messages`: the loop keeps mutating that same list
+        # (appending the assistant turn, then tool results) after this call
+        # returns — capturing the reference itself would let every past call
+        # silently "see" turns that hadn't happened yet when it was made.
+        self.calls.append({**kwargs, "messages": list(kwargs["messages"])})
         if not self._script:
             raise AssertionError("ScriptedClient ran out of scripted responses")
         return self._script.pop(0)
