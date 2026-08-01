@@ -132,6 +132,14 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.is_development else None,
     )
 
+    # Registered first so CORS (added next) ends up outermost — Starlette's
+    # add_middleware stack is LIFO, so the *last* middleware added wraps
+    # everything else. If this were outermost instead, its 413 short-circuit
+    # would bypass CORSMiddleware entirely: a cross-origin browser client
+    # would see an opaque CORS failure instead of a readable 413 JSON body.
+    # Still rejects an oversized body before routing/request parsing ever run.
+    app.add_middleware(MaxBodySizeMiddleware)
+
     # The browser widget calls this API cross-origin. Origins are an explicit
     # allowlist from config — never "*", which combined with credentials would
     # defeat the same-origin protection entirely.
@@ -142,9 +150,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # Added last so it wraps everything else (Starlette's stack is LIFO on
-    # add_middleware) — an oversized body 413s before CORS or routing ever run.
-    app.add_middleware(MaxBodySizeMiddleware)
 
     # Provider failures become a clean 502, never a raw stack trace.
     app.add_exception_handler(APIError, handle_provider_error)

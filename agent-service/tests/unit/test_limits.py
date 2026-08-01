@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator, MutableMapping
 from typing import Any
 
 import httpx
+from starlette.middleware.cors import CORSMiddleware
 
 from service.core.limits import MaxBodySizeMiddleware
 
@@ -73,6 +74,24 @@ async def test_a_chunked_body_over_the_cap_is_rejected_sans_content_length() -> 
 
     assert resp.status_code == 413
     assert resp.json() == {"detail": "Request body too large."}
+
+
+async def test_a_413_still_carries_cors_headers_for_a_cross_origin_caller() -> None:
+    """Regression guard for middleware *order*: MaxBodySizeMiddleware must be
+    registered inside CORSMiddleware (service/main.py::create_app), so its
+    413 short-circuit still passes back out through CORS. Wrong order and a
+    cross-origin browser client sees an opaque CORS failure instead of a
+    readable 413 — the JS layer never even gets to read the status/body."""
+    inner = MaxBodySizeMiddleware(_echo_app, max_bytes=16)
+    app = CORSMiddleware(inner, allow_origins=["http://localhost:3000"])
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post(
+            "/", content=b"x" * 32, headers={"Origin": "http://localhost:3000"}
+        )
+
+    assert resp.status_code == 413
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
 
 
 async def test_a_non_http_scope_passes_straight_through() -> None:
