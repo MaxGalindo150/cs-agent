@@ -29,7 +29,11 @@ export function MessageList({ messages, onSuggestion }: MessageListProps) {
   const lastPartCount = last?.parts.length ?? 0;
   const lastPart = last?.parts[last.parts.length - 1];
   const lastPartSize =
-    lastPart?.type === "text" ? lastPart.text.length : (lastPart?.steps.length ?? 0);
+    lastPart?.type === "text"
+      ? lastPart.text.length
+      : lastPart?.type === "steps"
+        ? lastPart.steps.length
+        : 0;
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, lastPartCount, lastPartSize]);

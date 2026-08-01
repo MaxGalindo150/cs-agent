@@ -22,6 +22,7 @@
 
 import type {
   ActivityStep,
+  AttachedImage,
   ConversationSummary,
   Message,
   MessagePart,
@@ -34,6 +35,9 @@ export interface StreamChatOptions {
   message: string;
   /** Continue an existing conversation. Omit to start a new one. */
   conversationId?: string;
+  /** Images attached as context for this turn only — never replayed on later
+   *  turns (see AttachedImage). */
+  images?: AttachedImage[];
   /**
    * The simulated host-app identity (see lib/identity/), forwarded as
    * X-User-Id/X-User-Email headers for agent-service's identity harness.
@@ -71,6 +75,7 @@ export interface StreamChatOptions {
 export async function streamChat({
   message,
   conversationId,
+  images,
   principal,
   onDelta,
   onConversationId,
@@ -89,7 +94,11 @@ export async function streamChat({
     headers,
     // `session_id: undefined` is dropped by JSON.stringify, so a new
     // conversation sends just `{ message }` and the server mints an id.
-    body: JSON.stringify({ message, session_id: conversationId }),
+    body: JSON.stringify({
+      message,
+      session_id: conversationId,
+      images: images?.map((img) => ({ media_type: img.mediaType, data: img.data })),
+    }),
     signal,
   });
 

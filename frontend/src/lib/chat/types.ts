@@ -16,18 +16,35 @@ export type Role = "user" | "assistant";
  */
 export type MessagePart =
   | { type: "text"; text: string }
-  | { type: "steps"; steps: ActivityStep[] };
+  | { type: "steps"; steps: ActivityStep[] }
+  | { type: "image"; previewUrl: string };
 
 export interface Message {
   id: string;
   role: Role;
   /** The turn's text and tool-activity groups, in the order they happened.
-   *  A user message is always a single text part. */
+   *  A user message is a text part plus, when images were attached, an
+   *  `image` part per attachment (client-side only — see `AttachedImage`). */
   parts: MessagePart[];
   /** True while the assistant reply is still streaming in. */
   streaming?: boolean;
   /** Set when this message failed to complete. */
   error?: string;
+}
+
+/**
+ * An image attached to the composer, ready to send. `previewUrl` is a local
+ * `URL.createObjectURL(file)` — used both for the composer's thumbnail and,
+ * after sending, the sent message's bubble. Never persisted server-side
+ * (agent-service only keeps a "[N image(s) attached]" text marker), so a
+ * reloaded transcript never has `image` parts on old messages — only the one
+ * just sent, for the lifetime of the tab.
+ */
+export interface AttachedImage {
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  /** Base64, no `data:...;base64,` prefix — what the API expects. */
+  data: string;
+  previewUrl: string;
 }
 
 /** One line in a `steps` part's activity timeline. */

@@ -18,11 +18,30 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
   if (isUser) {
-    const text = message.parts.find((p) => p.type === "text")?.text ?? "";
     return (
       <div className="flex w-full justify-end">
-        <div className="max-w-[75%] rounded-2xl bg-zinc-800/60 px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap text-zinc-100 shadow-md shadow-black/20 ring-1 ring-white/10 backdrop-blur-sm">
-          {text}
+        <div className="flex max-w-[75%] flex-col items-end gap-2">
+          {message.parts.map((part, i) =>
+            part.type === "image" ? (
+              // blob: object URL, only ever rendered for the turn just sent
+              // (never persisted/reloaded — see AttachedImage) — not a
+              // static/remote asset next/image is meant to optimize.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={i}
+                src={part.previewUrl}
+                alt="Attached"
+                className="max-h-64 rounded-2xl object-cover shadow-md shadow-black/20 ring-1 ring-white/10"
+              />
+            ) : part.type === "text" ? (
+              <div
+                key={i}
+                className="rounded-2xl bg-zinc-800/60 px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap text-zinc-100 shadow-md shadow-black/20 ring-1 ring-white/10 backdrop-blur-sm"
+              >
+                {part.text}
+              </div>
+            ) : null,
+          )}
         </div>
       </div>
     );
@@ -37,8 +56,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         <TypingDots />
       ) : (
         <>
-          {message.parts.map((part, i) =>
-            part.type === "steps" ? (
+          {message.parts.map((part, i) => {
+            // `image` parts only ever occur on a user turn (see AttachedImage) —
+            // an assistant turn never attaches one, so there's nothing to render.
+            if (part.type === "image") return null;
+            return part.type === "steps" ? (
               <ToolActivity
                 key={i}
                 steps={part.steps}
@@ -46,8 +68,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               />
             ) : (
               <Markdown key={i}>{part.text}</Markdown>
-            ),
-          )}
+            );
+          })}
           {message.streaming && <StreamingCursor />}
         </>
       )}
