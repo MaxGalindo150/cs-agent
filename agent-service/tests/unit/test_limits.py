@@ -76,12 +76,13 @@ async def test_a_chunked_body_over_the_cap_is_rejected_sans_content_length() -> 
     assert resp.json() == {"detail": "Request body too large."}
 
 
-async def test_a_413_still_carries_cors_headers_for_a_cross_origin_caller() -> None:
-    """Regression guard for middleware *order*: MaxBodySizeMiddleware must be
-    registered inside CORSMiddleware (service/main.py::create_app), so its
-    413 short-circuit still passes back out through CORS. Wrong order and a
-    cross-origin browser client sees an opaque CORS failure instead of a
-    readable 413 — the JS layer never even gets to read the status/body."""
+async def test_a_413_still_carries_cors_headers_when_cors_wraps_us() -> None:
+    """`service/main.py::create_app` must register this middleware *inside*
+    CORSMiddleware — this proves the mechanism (a 413 raised from here still
+    passes back out through an outer CORS layer). The registration itself is
+    guarded separately, against the real app, by
+    tests/contract/test_middleware_order.py — a hand-composed stand-in like
+    this one can't catch main.py's registration order flipping back."""
     inner = MaxBodySizeMiddleware(_echo_app, max_bytes=16)
     app = CORSMiddleware(inner, allow_origins=["http://localhost:3000"])
     transport = httpx.ASGITransport(app=app)
