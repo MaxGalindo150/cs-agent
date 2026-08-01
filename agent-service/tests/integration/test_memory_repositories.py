@@ -132,6 +132,102 @@ async def test_mark_consolidated_with_no_ids_is_a_no_op(
     assert await SessionRepository(db_session).mark_consolidated([]) == 0
 
 
+async def test_unconsolidated_user_ids_excludes_anonymous_sessions(
+    db_session: AsyncSession,
+) -> None:
+    """No owner, no consolidation (docs/SECURITY.md §3) — an anonymous
+    session's pending messages must never surface here."""
+    repo = SessionRepository(db_session)
+    identified = await repo.create_session(user_id="usr_alice")
+    anonymous = await repo.create_session()
+    await repo.append_message(identified.id, "user", "hola")
+    await repo.append_message(anonymous.id, "user", "hola")
+
+    assert await repo.list_unconsolidated_user_ids() == ["usr_alice"]
+
+
+async def test_unconsolidated_user_ids_lists_each_user_once(
+    db_session: AsyncSession,
+) -> None:
+    repo = SessionRepository(db_session)
+    session_1 = await repo.create_session(user_id="usr_alice")
+    session_2 = await repo.create_session(user_id="usr_alice")
+    await repo.append_message(session_1.id, "user", "uno")
+    await repo.append_message(session_2.id, "user", "dos")
+
+    assert await repo.list_unconsolidated_user_ids() == ["usr_alice"]
+
+
+async def test_unconsolidated_for_user_spans_all_their_sessions_in_order(
+    db_session: AsyncSession,
+) -> None:
+    repo = SessionRepository(db_session)
+    session_1 = await repo.create_session(user_id="usr_alice")
+    session_2 = await repo.create_session(user_id="usr_alice")
+    await repo.append_message(session_1.id, "user", "primero")
+    await repo.append_message(session_2.id, "user", "segundo")
+
+    messages = await repo.list_unconsolidated_for_user("usr_alice")
+
+    assert [m.content for m in messages] == ["primero", "segundo"]
+
+
+async def test_unconsolidated_for_user_never_crosses_users(
+    db_session: AsyncSession,
+) -> None:
+    repo = SessionRepository(db_session)
+    alice_session = await repo.create_session(user_id="usr_alice")
+    bob_session = await repo.create_session(user_id="usr_bob")
+    await repo.append_message(alice_session.id, "user", "de alice")
+    await repo.append_message(bob_session.id, "user", "de bob")
+
+    messages = await repo.list_unconsolidated_for_user("usr_alice")
+
+    assert [m.content for m in messages] == ["de alice"]
+
+
+async def test_unconsolidated_for_user_ignores_already_consolidated_messages(
+    db_session: AsyncSession,
+) -> None:
+    repo = SessionRepository(db_session)
+    session = await repo.create_session(user_id="usr_alice")
+    old = await repo.append_message(session.id, "user", "viejo")
+    await repo.append_message(session.id, "user", "nuevo")
+    await repo.mark_consolidated([old.id])
+
+    messages = await repo.list_unconsolidated_for_user("usr_alice")
+
+    assert [m.content for m in messages] == ["nuevo"]
+
+
+async def test_unconsolidated_user_ids_are_oldest_waiting_first(
+    db_session: AsyncSession,
+) -> None:
+    """A capped sweep (``limit``) must make fair progress — the user who's
+    been waiting longest goes first, not an arbitrary DISTINCT order."""
+    repo = SessionRepository(db_session)
+    bob_session = await repo.create_session(user_id="usr_bob")
+    await repo.append_message(bob_session.id, "user", "bob ha estado esperando")
+    alice_session = await repo.create_session(user_id="usr_alice")
+    await repo.append_message(alice_session.id, "user", "alice llegó después")
+
+    assert await repo.list_unconsolidated_user_ids() == ["usr_bob", "usr_alice"]
+
+
+async def test_unconsolidated_user_ids_respects_limit(
+    db_session: AsyncSession,
+) -> None:
+    repo = SessionRepository(db_session)
+    for user_id in ("usr_alice", "usr_bob", "usr_carol"):
+        session = await repo.create_session(user_id=user_id)
+        await repo.append_message(session.id, "user", "hola")
+
+    assert await repo.list_unconsolidated_user_ids(limit=2) == [
+        "usr_alice",
+        "usr_bob",
+    ]
+
+
 async def test_sessions_are_listed_most_recently_active_first(
     database: Database,
 ) -> None:
