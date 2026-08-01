@@ -202,10 +202,18 @@ def make_get_order_installments_tool(client: httpx.AsyncClient) -> Tool:
     )
 
 
-async def _shipment_summary(client: httpx.AsyncClient, order_id: str) -> dict[str, Any]:
+async def _shipment_summary(
+    client: httpx.AsyncClient, order_id: str, user_id: str
+) -> dict[str, Any]:
     """Best-effort shipment fields to fold into an order the caller already
     owns — a lookup failure here just means that one order has no shipment
-    info attached, never an error for the whole list."""
+    info attached, never an error for the whole list.
+
+    The order list is already filtered server-side by ``userId``, but this
+    still checks the shipment's own ``userId`` before using it — the same
+    "id + owner, one check" invariant as `get_order_shipment`, not just trust
+    that the upstream filter was applied correctly.
+    """
     try:
         resp = await client.get(f"/api/v1/orders/{order_id}/shipment")
     except httpx.RequestError:
@@ -215,6 +223,8 @@ async def _shipment_summary(client: httpx.AsyncClient, order_id: str) -> dict[st
     try:
         shipment = resp.json()
     except json.JSONDecodeError:
+        return {}
+    if shipment.get("userId") != user_id:
         return {}
     return {
         "shipmentStatus": shipment.get("status"),
@@ -258,7 +268,10 @@ def make_get_my_orders_tool(client: httpx.AsyncClient) -> Tool:
 
         orders = body.get("data", [])
         summaries = await asyncio.gather(
-            *(_shipment_summary(client, order["id"]) for order in orders)
+            *(
+                _shipment_summary(client, order["id"], ctx.principal.user_id)
+                for order in orders
+            )
         )
         for order, summary in zip(orders, summaries, strict=True):
             order.update(summary)

@@ -363,6 +363,24 @@ async def test_get_my_orders_filters_by_the_callers_own_user_id() -> None:
     assert body["data"][0]["shipmentStatus"] == "in_transit"
 
 
+async def test_get_my_orders_omits_shipment_fields_for_a_mismatched_owner() -> None:
+    """The order list is already filtered by userId server-side, but the
+    shipment's own userId is still checked — never trust the upstream filter
+    alone (same invariant as get_order_shipment)."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/orders":
+            return httpx.Response(200, json={"data": [_ORDER], "total": 1})
+        mismatched = {**_SHIPMENT, "userId": "usr_bob"}
+        return httpx.Response(200, json=mismatched)
+
+    async with _client(handle) as client:
+        out = await make_get_my_orders_tool(client).fn(_ALICE)
+
+    body = json.loads(out)
+    assert "shipmentStatus" not in body["data"][0]
+
+
 async def test_get_my_orders_omits_shipment_fields_when_the_lookup_fails() -> None:
     """Best-effort enrichment: one order's shipment lookup failing must not
     fail the whole list, only leave that order without shipment fields."""

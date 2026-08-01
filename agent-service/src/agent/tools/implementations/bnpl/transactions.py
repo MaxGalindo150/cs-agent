@@ -12,6 +12,8 @@ Identity-gated (`requires_identity=True`, docs/SECURITY.md §3), but unlike
 
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from agent.tools.context import ToolContext
@@ -43,7 +45,23 @@ def make_get_transactions_tool(client: httpx.AsyncClient) -> Tool:
             )
         if resp.status_code != 200:
             return f"Could not look up your transactions (status {resp.status_code})."
-        return resp.text
+        try:
+            body = resp.json()
+        except json.JSONDecodeError:
+            return "Could not look up your transactions (bad response from service)."
+        transactions = body.get("data")
+        # Never trust the upstream userId filter alone — verify every
+        # transaction actually belongs to the caller before returning any of
+        # them. Unlike get_my_orders' best-effort shipment enrichment, a
+        # transaction failing this check means the filter itself may be
+        # broken, so the whole response is refused rather than silently
+        # narrowed to a partial list.
+        if not isinstance(transactions, list) or any(
+            not isinstance(txn, dict) or txn.get("userId") != ctx.principal.user_id
+            for txn in transactions
+        ):
+            return "Could not look up your transactions (bad response from service)."
+        return json.dumps(body, ensure_ascii=False)
 
     return Tool(
         name="get_transactions",

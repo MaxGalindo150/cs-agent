@@ -80,6 +80,42 @@ def test_get_transactions_type_filter_is_constrained_to_known_values() -> None:
     ]
 
 
+async def test_get_transactions_refuses_a_leaked_transaction() -> None:
+    """Never trust the upstream userId filter alone — if the service's own
+    filter is wrong (or bypassed), refuse the whole response rather than
+    leak another customer's transactions."""
+    leaked = {**_TRANSACTIONS_PAGE, "data": [{**_TRANSACTIONS_PAGE["data"][0]}]}
+    leaked["data"][0]["userId"] = "usr_bob"
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=leaked)
+
+    async with _client(handle) as client:
+        out = await make_get_transactions_tool(client).fn(_ALICE)
+
+    assert "bad response from service" in out
+
+
+async def test_get_transactions_refuses_when_data_is_not_a_list() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": "not a list", "total": 1})
+
+    async with _client(handle) as client:
+        out = await make_get_transactions_tool(client).fn(_ALICE)
+
+    assert "bad response from service" in out
+
+
+async def test_get_transactions_with_malformed_json_is_honest() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"not json")
+
+    async with _client(handle) as client:
+        out = await make_get_transactions_tool(client).fn(_ALICE)
+
+    assert "bad response from service" in out
+
+
 async def test_get_transactions_non_200_is_honest() -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
