@@ -45,6 +45,13 @@ class LoopResult:
     reply: str
     tool_calls: list[LoopEvent] = field(default_factory=list)
     iterations: int = 0
+    # The turn's text and tool-call groups, in the order they actually
+    # happened — e.g. [text, tools, text] for "I'll escalate this" ->
+    # escalate_to_human -> "Done, a person will follow up". `reply` alone
+    # collapses that back to one string (for callers that just want the
+    # final answer); this is what lets a client render the tool activity
+    # between the two sentences instead of hoisting it above both.
+    segments: list[LoopEvent] = field(default_factory=list)
 
 
 async def run_loop(
@@ -131,13 +138,22 @@ async def run_loop(
         )
 
         tool_uses = [b for b in response.content if isinstance(b, ToolUseBlock)]
+        text = "".join(b.text for b in response.content if isinstance(b, TextBlock))
 
         # ---- guardrail 1: no tool calls -> the model is talking to the human
         if not tool_uses:
-            result.reply = "".join(
-                b.text for b in response.content if isinstance(b, TextBlock)
+            if text:
+                result.segments.append({"type": "text", "text": text})
+            result.reply = "\n\n".join(
+                seg["text"] for seg in result.segments if seg["type"] == "text"
             )
             return result
+
+        # A model can talk before it acts ("Voy a escalar esto...") in the same
+        # response that asks for a tool — capture that lead-in as its own
+        # segment now, before the tool group, so it keeps its place in order.
+        if text:
+            result.segments.append({"type": "text", "text": text})
 
         # ---- act: execute requested tools concurrently; observe: feed back.
         # Tools are independent (no shared mutable state in the registry), so a
@@ -163,13 +179,17 @@ async def run_loop(
             *(tools.execute(call.name, call.input, ctx) for call in tool_uses)
         )
         tool_results: list[ToolResultBlockParam] = []
+        calls: list[LoopEvent] = []
         for call, output in zip(tool_uses, outputs, strict=True):
-            event = {"tool": call.name, "args": call.input, "output": output}
+            args = cast("dict[str, Any]", call.input)
+            event = {"tool": call.name, "args": args, "output": output}
             result.tool_calls.append(event)
             notify("tool", event)
+            calls.append({**event, "label": tools.label(call.name, args)})
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": call.id, "content": output}
             )
+        result.segments.append({"type": "tools", "calls": calls})
         messages.append({"role": "user", "content": tool_results})
 
     notify("limit_reached", {"max_iterations": max_iterations})
@@ -177,4 +197,5 @@ async def run_loop(
         "(I hit my iteration limit before finishing - "
         "try breaking the request into smaller steps.)"
     )
+    result.segments.append({"type": "text", "text": result.reply})
     return result

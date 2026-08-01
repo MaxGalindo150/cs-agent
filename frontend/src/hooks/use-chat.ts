@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchMessages, streamChat } from "@/lib/chat/api";
-import type { ActivityStep, Message } from "@/lib/chat/types";
+import type { ActivityStep, Message, MessagePart } from "@/lib/chat/types";
 
 // Remembers the active conversation across reloads.
 const STORAGE_KEY = "csa:conversationId";
@@ -68,32 +68,69 @@ export function useChat(options: UseChatOptions = {}): UseChat {
     );
   }, []);
 
-  /** Append an activity step to the assistant message being built. */
+  /** Append an activity step to the assistant message being built. Joins the
+   *  trailing `steps` part if the last thing that happened was also a step
+   *  (a tool batch), else opens a new one — so a step that starts after some
+   *  text becomes its own group, in place, rather than merging into an
+   *  unrelated earlier group above the text. */
   const addStep = useCallback((id: string, step: ActivityStep) => {
     setMessages((prev) =>
-      prev.map((m) =>
-        m.id === id ? { ...m, steps: [...(m.steps ?? []), step] } : m,
-      ),
+      prev.map((m) => {
+        if (m.id !== id) return m;
+        const last = m.parts[m.parts.length - 1];
+        if (last?.type === "steps") {
+          const parts = m.parts.slice(0, -1);
+          return { ...m, parts: [...parts, { ...last, steps: [...last.steps, step] }] };
+        }
+        const part: MessagePart = { type: "steps", steps: [step] };
+        return { ...m, parts: [...m.parts, part] };
+      }),
     );
   }, []);
 
-  /** Close the oldest still-running step for `tool`. Tools run in batches and
-   *  results arrive in completion order, not call order, so matching by name
-   *  (rather than by position) is what keeps a batch of two `get_order` calls
-   *  from marking the same row done twice. */
+  /** Close the oldest still-running step for `tool`, across every `steps`
+   *  part (not just the last one). Tools run in batches and results arrive
+   *  in completion order, not call order, so matching by name (rather than
+   *  by position) is what keeps a batch of two `get_order` calls from
+   *  marking the same row done twice. */
   const finishStep = useCallback((id: string, tool: string) => {
     setMessages((prev) =>
       prev.map((m) => {
-        if (m.id !== id || !m.steps) return m;
+        if (m.id !== id) return m;
         let closed = false;
         return {
           ...m,
-          steps: m.steps.map((s) => {
-            if (closed || s.tool !== tool || s.status !== "running") return s;
-            closed = true;
-            return { ...s, status: "done" as const };
+          parts: m.parts.map((part) => {
+            if (closed || part.type !== "steps") return part;
+            return {
+              ...part,
+              steps: part.steps.map((s) => {
+                if (closed || s.tool !== tool || s.status !== "running") return s;
+                closed = true;
+                return { ...s, status: "done" as const };
+              }),
+            };
           }),
         };
+      }),
+    );
+  }, []);
+
+  /** Append a text delta to the assistant message being built. Joins the
+   *  trailing `text` part if the last thing that happened was also text,
+   *  else opens a new part — so text that resumes after a tool call becomes
+   *  its own segment, positioned after that tool's activity. */
+  const appendDelta = useCallback((id: string, delta: string) => {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== id) return m;
+        const last = m.parts[m.parts.length - 1];
+        if (last?.type === "text") {
+          const parts = m.parts.slice(0, -1);
+          return { ...m, parts: [...parts, { type: "text", text: last.text + delta }] };
+        }
+        const part: MessagePart = { type: "text", text: delta };
+        return { ...m, parts: [...m.parts, part] };
       }),
     );
   }, []);
@@ -106,13 +143,13 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       const userMessage: Message = {
         id: newId(),
         role: "user",
-        content: trimmed,
+        parts: [{ type: "text", text: trimmed }],
       };
       const assistantId = newId();
       const assistantMessage: Message = {
         id: assistantId,
         role: "assistant",
-        content: "",
+        parts: [],
         streaming: true,
       };
 
@@ -150,14 +187,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
             status: "running",
           }),
         onTool: (event) => finishStep(assistantId, event.tool),
-        onDelta: (delta) =>
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: m.content + delta }
-                : m,
-            ),
-          ),
+        onDelta: (delta) => appendDelta(assistantId, delta),
       })
         .then(() => patch(assistantId, { streaming: false }))
         .catch((err: unknown) => {
@@ -180,6 +210,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       patch,
       addStep,
       finishStep,
+      appendDelta,
       setConversation,
       onConversationUpdate,
       principal,

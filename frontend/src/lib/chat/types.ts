@@ -7,20 +7,30 @@
 
 export type Role = "user" | "assistant";
 
+/**
+ * A chunk of an assistant turn, in the order it actually happened: some text,
+ * then maybe a group of tool calls, then maybe more text ("I'll escalate
+ * this" -> escalate_to_human -> "Done, someone will follow up"). Rendering
+ * `parts` in order is what lets a tool's activity widget sit between the two
+ * sentences instead of every tool call being hoisted above the whole reply.
+ */
+export type MessagePart =
+  | { type: "text"; text: string }
+  | { type: "steps"; steps: ActivityStep[] };
+
 export interface Message {
   id: string;
   role: Role;
-  content: string;
+  /** The turn's text and tool-activity groups, in the order they happened.
+   *  A user message is always a single text part. */
+  parts: MessagePart[];
   /** True while the assistant reply is still streaming in. */
   streaming?: boolean;
   /** Set when this message failed to complete. */
   error?: string;
-  /** What the agent did before answering, in the order it happened. Only ever
-   *  set on assistant messages, and only for a turn that did something. */
-  steps?: ActivityStep[];
 }
 
-/** One line in the activity timeline shown above an assistant reply. */
+/** One line in a `steps` part's activity timeline. */
 export interface ActivityStep {
   id: string;
   kind: "memory" | "tool";
