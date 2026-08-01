@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchMessages, streamChat } from "@/lib/chat/api";
-import type { ActivityStep, Message, MessagePart } from "@/lib/chat/types";
+import type { ActivityStep, AttachedImage, Message, MessagePart } from "@/lib/chat/types";
 
 // Remembers the active conversation across reloads.
 const STORAGE_KEY = "csa:conversationId";
@@ -28,8 +28,9 @@ export interface UseChat {
   isStreaming: boolean;
   /** Id of the active conversation, or null for a fresh (unsent) one. */
   conversationId: string | null;
-  /** Send a user message and stream the assistant reply. */
-  send: (text: string) => void;
+  /** Send a user message, optionally with images attached as context, and
+   *  stream the assistant reply. */
+  send: (text: string, images?: AttachedImage[]) => void;
   /** Cancel the in-flight stream, keeping whatever text arrived so far. */
   stop: () => void;
   /** Start a fresh conversation: clear the transcript and forget the thread. */
@@ -136,14 +137,22 @@ export function useChat(options: UseChatOptions = {}): UseChat {
   }, []);
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, images?: AttachedImage[]) => {
       const trimmed = text.trim();
       if (!trimmed || isStreaming) return;
+
+      // Images render above the caption, like most chat apps — read as
+      // "here's the picture, and here's what I'm saying about it".
+      const userParts: MessagePart[] = (images ?? []).map((img) => ({
+        type: "image",
+        previewUrl: img.previewUrl,
+      }));
+      userParts.push({ type: "text", text: trimmed });
 
       const userMessage: Message = {
         id: newId(),
         role: "user",
-        parts: [{ type: "text", text: trimmed }],
+        parts: userParts,
       };
       const assistantId = newId();
       const assistantMessage: Message = {
@@ -162,6 +171,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       streamChat({
         message: trimmed,
         conversationId: conversationIdRef.current ?? undefined,
+        images,
         principal,
         signal: controller.signal,
         onConversationId: (id) => setConversation(id),
