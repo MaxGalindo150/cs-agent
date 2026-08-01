@@ -1,0 +1,7 @@
+{"id": "uncovered-email-change", "input": "Hola, quiero cambiar mi email de alice@example.com a alice.nueva@example.com", "expect_tool": "escalate_to_human"}
+{"id": "uncovered-manual-refund", "input": "Necesito que me reembolsen ya, me cobraron dos veces la cuota de mi orden ord_1234 el 20 de julio", "expect_tool": "escalate_to_human"}
+{"id": "uncovered-cancel-account", "input": "Quiero cancelar mi cuenta por completo", "expect_tool": "escalate_to_human"}
+{"id": "uncovered-change-payment-method", "input": "Cambia mi tarjeta de pago a una nueva, la actual ya no sirve", "expect_tool": "escalate_to_human"}
+{"id": "no-tool-greeting", "input": "Hola, buen día", "expect_tool": null}
+{"id": "covered-shipment-status", "principal_scenario": "shipment_stuck", "input": "Hice un pedido y no me ha llegado, no sé cuál orden es", "expect_tool": "get_my_orders"}
+{"id": "covered-duplicate-payment-investigates-first", "principal_scenario": "double_payment", "input": "Creo que me cobraron dos veces la misma cuota de una de mis órdenes", "expect_tool": "escalate_to_human", "expect_min_tool_calls": 2}
