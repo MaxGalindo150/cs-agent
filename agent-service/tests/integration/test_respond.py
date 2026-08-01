@@ -18,6 +18,7 @@ from agent.identity import Principal
 from agent.memory.db import Database
 from agent.memory.repositories import SessionRepository
 from agent.tools.registry import Tool, ToolRegistry
+from agent.vision import Image
 from integration.helpers import (
     ScriptedClient,
     make_agent,
@@ -238,6 +239,65 @@ async def test_meta_carries_the_ordered_text_and_tool_segments(
         },
         {"type": "text", "text": "It was delivered."},
     ]
+
+
+async def test_an_image_reaches_the_llm_but_never_gets_persisted_raw(
+    database: Database,
+) -> None:
+    """The image must reach the model's content blocks for THIS call, but
+    never the persisted row nor a later turn's replayed history — only a
+    short marker does (agent/app.py::_user_content / _with_image_marker)."""
+    client = ScriptedClient(
+        [
+            response(
+                [text_block('{"retrieve": false, "query": "", "reason": "test"}')]
+            ),
+            response([text_block("Veo el comprobante, gracias.")]),
+            response(
+                [text_block('{"retrieve": false, "query": "", "reason": "test"}')]
+            ),
+            response([text_block("¿Algo más en lo que te ayude?")]),
+        ]
+    )
+    agent = make_agent(database, client)
+    session_id = await _new_session(database)
+    image = Image(media_type="image/png", data="aGVsbG8=")
+
+    await agent.respond(session_id, "aquí está mi comprobante", images=[image])
+
+    # The loop's main call (index 1 — index 0 is the retrieval gate) carries
+    # the image block alongside the text, as the turn's last message.
+    loop_call = client.messages.calls[1]
+    last_message = loop_call["messages"][-1]
+    assert last_message["role"] == "user"
+    assert last_message["content"] == [
+        {"type": "text", "text": "aquí está mi comprobante"},
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "aGVsbG8=",
+            },
+        },
+    ]
+
+    async with database.session() as session:
+        messages = await SessionRepository(session).list_messages(session_id)
+    user_row = next(m for m in messages if m.role == "user")
+    assert user_row.content == "aquí está mi comprobante\n[1 image attached]"
+
+    # A second turn: the reloaded history must carry the marker text, never
+    # replay the image itself (agent/app.py's whole reason for the marker).
+    await agent.respond(session_id, "gracias, eso es todo")
+
+    second_loop_call = client.messages.calls[3]
+    history_content = [m["content"] for m in second_loop_call["messages"]]
+    assert "aquí está mi comprobante\n[1 image attached]" in history_content
+    assert not any(
+        isinstance(c, list) and any(b.get("type") == "image" for b in c)
+        for c in history_content
+    )
 
 
 async def test_an_escalated_session_short_circuits_the_llm_entirely(

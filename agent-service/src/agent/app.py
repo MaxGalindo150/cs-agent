@@ -42,6 +42,42 @@ from agent.ops.tracing import Tracer, TracerConfig, compose
 from agent.runtime.session import Session
 from agent.tools.context import ToolContext
 from agent.tools.registry import ToolRegistry
+from agent.vision import Image
+
+
+def _user_content(text: str, images: list[Image] | None) -> str | list[dict[str, Any]]:
+    """The LLM-facing content for this turn: plain text normally, or a text
+    block plus one image block per attachment. Built fresh per call — never
+    persisted (see ``_with_image_marker``) and never carried into a later
+    turn's history, so a conversation's cost/size doesn't grow with every
+    image a customer ever sent, only the one just attached."""
+    if not images:
+        return text
+    blocks: list[dict[str, Any]] = [{"type": "text", "text": text}]
+    blocks.extend(
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": img.media_type,
+                "data": img.data,
+            },
+        }
+        for img in images
+    )
+    return blocks
+
+
+def _with_image_marker(text: str, images: list[Image] | None) -> str:
+    """What gets persisted/replayed instead of the raw image: a short note,
+    not the bytes — Postgres's ``chat_messages.content`` would otherwise
+    balloon, and every later turn's working memory would re-send it forever
+    (the same reasoning as truncating a tool's output, see
+    ``agent/runtime/session.py``)."""
+    if not images:
+        return text
+    noun = "image" if len(images) == 1 else "images"
+    return f"{text}\n[{len(images)} {noun} attached]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +157,7 @@ class Agent:
         source: str = "api",
         stream: bool = False,
         principal: Principal | None = None,
+        images: list[Image] | None = None,
     ) -> LoopResult:
         """One full turn: assemble working memory → run the loop → persist.
 
@@ -141,6 +178,11 @@ class Agent:
         for an anonymous visitor) — wrapped once, here, into the ``ToolContext``
         the loop forwards opaquely to ``ToolRegistry.execute``.
 
+        ``images`` are attached as vision context for THIS call only — never
+        persisted or replayed into a later turn's working memory (see
+        ``_user_content``/``_with_image_marker``); what's recorded instead is
+        a short marker noting how many arrived.
+
         Before any of that: ``session.fixed_response()`` may short-circuit the
         whole turn (e.g. an already-escalated session) — the message is still
         recorded, but the LLM/tools never run and a canned reply goes out
@@ -159,8 +201,9 @@ class Agent:
         notify = compose(observer, self._tracer.event, _capture)
         t0 = time.perf_counter()
         ctx = ToolContext(principal=principal, session_id=session_id)
+        persisted_message = _with_image_marker(user_message, images)
 
-        with self._tracer.turn(user_message, session_id=str(session_id)):
+        with self._tracer.turn(persisted_message, session_id=str(session_id)):
             # No held session (unlike Waku): build one per request and load this
             # conversation's recent history from Postgres before assembling the
             # prompt. Discarded when the turn ends — nothing conversation-specific
@@ -178,7 +221,7 @@ class Agent:
             if fixed is not None:
                 notify("text", {"delta": fixed})
                 await session.add_exchange(
-                    user_message,
+                    persisted_message,
                     fixed,
                     source=source,
                     meta={
@@ -194,10 +237,13 @@ class Agent:
 
             # session.history is list[dict]; the loop wants the SDK's MessageParam.
             # Cast at this boundary (as the loop casts its tool schemas) — the
-            # runtime shapes match, only the static type differs.
+            # runtime shapes match, only the static type differs. Only THIS
+            # entry may carry image blocks — session.history's prior turns are
+            # always plain text (see _user_content/_with_image_marker above).
             messages = cast(
                 "list[MessageParam]",
-                session.history + [{"role": "user", "content": user_message}],
+                session.history
+                + [{"role": "user", "content": _user_content(user_message, images)}],
             )
 
             result = await run_loop(
@@ -242,7 +288,7 @@ class Agent:
                 "provider": self._config.provider,
             }
             await session.add_exchange(
-                user_message,
+                persisted_message,
                 result.reply,
                 tool_calls=result.tool_calls,
                 source=source,

@@ -35,6 +35,7 @@ from service.core.agent import (
     build_service_agent,
 )
 from service.core.config import Settings, get_settings
+from service.core.limits import MaxBodySizeMiddleware
 from service.core.llm import build_anthropic_client
 from service.core.migrations import upgrade_to_head
 from service.core.tooling import build_bnpl_client
@@ -130,6 +131,14 @@ def create_app() -> FastAPI:
         redoc_url=None,
         openapi_url="/openapi.json" if settings.is_development else None,
     )
+
+    # Registered first so CORS (added next) ends up outermost — Starlette's
+    # add_middleware stack is LIFO, so the *last* middleware added wraps
+    # everything else. If this were outermost instead, its 413 short-circuit
+    # would bypass CORSMiddleware entirely: a cross-origin browser client
+    # would see an opaque CORS failure instead of a readable 413 JSON body.
+    # Still rejects an oversized body before routing/request parsing ever run.
+    app.add_middleware(MaxBodySizeMiddleware)
 
     # The browser widget calls this API cross-origin. Origins are an explicit
     # allowlist from config — never "*", which combined with credentials would

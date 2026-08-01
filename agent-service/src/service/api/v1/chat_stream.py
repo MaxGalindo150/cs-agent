@@ -97,6 +97,8 @@ async def chat_stream(
         elif kind == "limit_reached":
             queue.put_nowait(("limit_reached", event))
 
+    images = [img.to_agent_image() for img in req.images] or None
+
     async def drive() -> None:
         try:
             result = await agent.respond(
@@ -106,6 +108,7 @@ async def chat_stream(
                 source="api",
                 stream=True,
                 principal=principal,
+                images=images,
             )
             queue.put_nowait(("done", result.reply))
         except anthropic.APIError as exc:

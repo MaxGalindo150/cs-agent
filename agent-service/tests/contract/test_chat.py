@@ -8,6 +8,7 @@ real Postgres) is covered by ``tests/integration/test_respond.py``.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from collections.abc import AsyncIterator
 
@@ -18,15 +19,26 @@ import pytest
 from agent.identity import Principal
 from agent.loop.agent import LoopResult
 from agent.observability import Observer
+from agent.vision import Image
 from service.core.agent import get_agent
 from service.main import create_app
 
 _SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
+# A real (tiny, 2x2 red) PNG — the magic-number check in
+# ImageInput._validate_base64_and_size rejects anything that doesn't actually
+# look like its declared media_type, so "valid image" test fixtures need real
+# bytes, not an arbitrary base64 string.
+_TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7"
+    "gP9i18U1AAAAABJRU5ErkJggg=="
+)
+
 
 class _FakeAgent:
     def __init__(self) -> None:
         self.received_principal: Principal | None = None
+        self.received_images: list[Image] | None = None
         self.start_session_principal: Principal | None = None
 
     async def start_session(
@@ -43,8 +55,10 @@ class _FakeAgent:
         source: str = "api",
         stream: bool = False,
         principal: Principal | None = None,
+        images: list[Image] | None = None,
     ) -> LoopResult:
         self.received_principal = principal
+        self.received_images = images
         return LoopResult(reply="hi from fake", iterations=1)
 
 
@@ -122,6 +136,107 @@ async def test_chat_rejects_empty_message(chat_client: httpx.AsyncClient) -> Non
     assert resp.status_code == 422
 
 
+async def test_chat_forwards_a_valid_image_to_respond() -> None:
+    app = create_app()
+    agent = _FakeAgent()
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post(
+            "/v1/chat",
+            json={
+                "message": "aquí está mi comprobante",
+                "images": [{"media_type": "image/png", "data": _TINY_PNG_B64}],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert agent.received_images == [Image(media_type="image/png", data=_TINY_PNG_B64)]
+
+
+async def test_chat_rejects_a_malformed_base64_image(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    # Validation at the boundary: bad base64 must 422 before it ever reaches
+    # the LLM call, not surface as an opaque provider error mid-turn.
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={
+            "message": "hola",
+            "images": [{"media_type": "image/png", "data": "not-valid-base64!!!"}],
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_chat_rejects_an_oversized_image(chat_client: httpx.AsyncClient) -> None:
+    oversized = base64.b64encode(b"x" * (5 * 1024 * 1024 + 1)).decode()
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={
+            "message": "hola",
+            "images": [{"media_type": "image/png", "data": oversized}],
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_chat_rejects_a_data_string_longer_than_the_base64_cap(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    """`Field(max_length=_MAX_IMAGE_BASE64_CHARS)` must reject an oversized
+    `data` string by its encoded length alone, before the field_validator ever
+    calls `base64.b64decode` on it — the fix for a request that could
+    otherwise force a full decode of an attacker-supplied multi-GB string
+    before any size check ran (see _MAX_IMAGE_BASE64_CHARS in
+    service/api/v1/chat.py)."""
+    from service.api.v1.chat import _MAX_IMAGE_BASE64_CHARS
+
+    oversized = "x" * (_MAX_IMAGE_BASE64_CHARS + 1)
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={
+            "message": "hola",
+            "images": [{"media_type": "image/png", "data": oversized}],
+        },
+    )
+
+    assert resp.status_code == 422
+    # Rejected by the length cap itself — the custom base64 validator (whose
+    # errors mention "base64") never even ran.
+    assert "base64" not in resp.text
+
+
+async def test_chat_rejects_a_mismatched_media_type(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    # "hello", base64-encoded, declared as a PNG: valid base64, well under the
+    # size limit, but not remotely a PNG — the magic-number check must catch
+    # a mislabeled (or non-image) payload the earlier checks let through.
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={
+            "message": "hola",
+            "images": [{"media_type": "image/png", "data": "aGVsbG8="}],
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_chat_rejects_more_images_than_the_per_turn_limit(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    image = {"media_type": "image/png", "data": _TINY_PNG_B64}
+    resp = await chat_client.post(
+        "/v1/chat", json={"message": "hola", "images": [image] * 5}
+    )
+
+    assert resp.status_code == 422
+
+
 class _BoomAgent:
     async def start_session(
         self, title: str | None = None, principal: Principal | None = None
@@ -136,6 +251,7 @@ class _BoomAgent:
         source: str = "api",
         stream: bool = False,
         principal: Principal | None = None,
+        images: list[Image] | None = None,
     ) -> LoopResult:
         raise anthropic.APIError(
             "upstream boom", httpx.Request("POST", "http://test"), body=None
