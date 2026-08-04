@@ -77,6 +77,11 @@ function numericPaymentId(referencia: string): string {
   return String(100_000_000 + (hash % 900_000_000));
 }
 
+/** Verifica si un ID es un paymentId sintético (numérico de 9 dígitos o pmt_mock_). */
+function isSyntheticPaymentId(id: string): boolean {
+  return id.startsWith(MOCK_PAYMENT_PREFIX) || /^\d{9}$/.test(id);
+}
+
 /** Cuotas del usuario en orden estable (por orden, luego número). Solo lectura. */
 function userInstallments(db: ReturnType<typeof getDB>, userId: string): Installment[] {
   return db.installments
@@ -159,8 +164,8 @@ paymentRoutes.post("/payments/validate", async (c) => {
     return c.json({ error: "Invalid body" }, 400);
   }
 
-  if (!body.referencia) {
-    return c.json({ error: "referencia is required" }, 400);
+  if (typeof body.referencia !== "string" || body.referencia.trim() === "") {
+    return c.json({ error: "referencia is required and must be a string" }, 400);
   }
 
   const referencia = body.referencia;
@@ -223,12 +228,12 @@ paymentRoutes.post("/payments/:id/reassign", async (c) => {
 
   const payment = db.payments.get(paymentId);
 
-  // ── Pago sintético (viene de un validate con REF_WRONG…) ────────────
+  // ── Pago sintético (viene de un validate con prefijo 30…) ──────────
   // `validate` no persiste nada, así que ese pago no existe en la DB. Se
   // responde canned para que el flujo validate → reassign sea coherente en
   // los dos turnos, que es justo lo que el eval L3 necesita ejercitar.
   if (!payment) {
-    if (!paymentId.startsWith(MOCK_PAYMENT_PREFIX)) {
+    if (!isSyntheticPaymentId(paymentId)) {
       return c.json({ error: "Payment not found" }, 404);
     }
     if (!body.installmentId) {

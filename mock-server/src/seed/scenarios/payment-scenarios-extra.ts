@@ -75,7 +75,7 @@ export const paymentWrongOrder: Scenario = {
         externalReference: `30${id("").slice(0, 10).replace(/[^0-9]/g, "").padStart(10, "0")}`,
         amount: correctInst.amountDue, // el monto que el cliente realmente pagó
         currency: "VES",
-        method: "spei",
+        method: "bank_transfer",
         status: "validated",
         appliedTo: {
           installmentId: wrongInst.id,

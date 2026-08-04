@@ -328,6 +328,19 @@ interface OrderContext {
   pointsTxns: PointsTransaction[];
 }
 
+/** IDs de orden ya generados en este seed — evita colisiones silenciosas. */
+const generatedOrderIds = new Set<string>();
+
+/** Genera un ID de orden numérico de 9 dígitos, garantizando unicidad dentro del seed. */
+function uniqueOrderId(): string {
+  let candidate = f.string.numeric({ length: 9 });
+  while (generatedOrderIds.has(candidate)) {
+    candidate = f.string.numeric({ length: 9 });
+  }
+  generatedOrderIds.add(candidate);
+  return candidate;
+}
+
 export function generateOrder(
   user: User,
   merchant: Merchant,
@@ -396,7 +409,7 @@ export function generateOrder(
   }
 
   const order: Order = {
-    id: f.string.numeric({ length: 9 }),
+    id: uniqueOrderId(),
     userId: user.id,
     merchantId: merchant.id,
     merchantName: merchant.name,
