@@ -49,6 +49,10 @@ export interface Message {
   streaming?: boolean;
   /** Set when this message failed to complete. */
   error?: string;
+  /** Set when this reply is a harness-level escalation (session already
+   *  flagged, or a resumed turn ran out of iteration budget) rather than an
+   *  ordinary answer — from the SSE `done` event's `needs_human` field. */
+  needsHuman?: boolean;
 }
 
 /**

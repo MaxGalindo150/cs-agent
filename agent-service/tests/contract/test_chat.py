@@ -48,6 +48,7 @@ class _FakeAgent:
         self.received_choice_id: str | None = None
         self.start_session_principal: Principal | None = None
         self.segments: list[dict[str, object]] = []
+        self.needs_human: bool = False
 
     async def start_session(
         self, title: str | None = None, principal: Principal | None = None
@@ -69,7 +70,12 @@ class _FakeAgent:
         self.received_principal = principal
         self.received_images = images
         self.received_choice_id = choice_id
-        return LoopResult(reply="hi from fake", iterations=1, segments=self.segments)
+        return LoopResult(
+            reply="hi from fake",
+            iterations=1,
+            segments=self.segments,
+            needs_human=self.needs_human,
+        )
 
 
 @pytest.fixture
@@ -312,6 +318,23 @@ async def test_chat_response_has_no_choice_field_for_an_ordinary_turn(
     resp = await chat_client.post("/v1/chat", json={"message": "hello"})
 
     assert resp.json()["choice"] is None
+    assert resp.json()["needs_human"] is False
+
+
+async def test_chat_surfaces_needs_human_for_a_harness_level_escalation() -> None:
+    """A budget-exhausted resume (or an already-escalated session) returns a
+    reply that otherwise looks identical to an ordinary one — `needs_human`
+    is the only machine-readable signal a client has to tell them apart."""
+    app = create_app()
+    agent = _FakeAgent()
+    agent.needs_human = True
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/v1/chat", json={"message": "hello"})
+
+    assert resp.status_code == 200
+    assert resp.json()["needs_human"] is True
 
 
 async def test_chat_rejects_more_images_than_the_per_turn_limit(

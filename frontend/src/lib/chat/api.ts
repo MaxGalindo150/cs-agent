@@ -74,6 +74,10 @@ export interface StreamChatOptions {
   onChoice?: (prompt: string, options: ChoiceOption[]) => void;
   /** Called when the agent hit a budget guard (max turns / tool calls). */
   onLimitReached?: (detail: unknown) => void;
+  /** Called when `done` carries `needs_human: true` — the reply is a
+   *  harness-level escalation (session already flagged, or a resumed turn
+   *  ran out of iteration budget), not an ordinary answer. */
+  onNeedsHuman?: () => void;
   /** Lets the caller cancel the request (e.g. a stop button or unmount). */
   signal?: AbortSignal;
 }
@@ -96,6 +100,7 @@ export async function streamChat({
   onTool,
   onChoice,
   onLimitReached,
+  onNeedsHuman,
   signal,
 }: StreamChatOptions): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -188,8 +193,12 @@ export async function streamChat({
         return false;
       }
       case "done": {
-        const full = String(payload);
-        if (!sawDelta && !renderedChoice && full) onDelta(full);
+        const { reply, needs_human } = payload as {
+          reply: string;
+          needs_human?: boolean;
+        };
+        if (!sawDelta && !renderedChoice && reply) onDelta(reply);
+        if (needs_human) onNeedsHuman?.();
         return true; // terminal
       }
       case "error":

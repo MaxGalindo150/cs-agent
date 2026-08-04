@@ -260,6 +260,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
         onTool: (event) => finishStep(assistantId, event.tool),
         onChoice: (prompt, options) => addChoice(assistantId, prompt, options),
         onDelta: (delta) => appendDelta(assistantId, delta),
+        onNeedsHuman: () => patch(assistantId, { needsHuman: true }),
       })
         .then(() => patch(assistantId, { streaming: false }))
         .catch((err: unknown) => {
@@ -339,6 +340,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
         onTool: (event) => finishStep(assistantId, event.tool),
         onChoice: (prompt, options) => addChoice(assistantId, prompt, options),
         onDelta: (delta) => appendDelta(assistantId, delta),
+        onNeedsHuman: () => patch(assistantId, { needsHuman: true }),
       })
         .then(() => patch(assistantId, { streaming: false }))
         .catch((err: unknown) => {

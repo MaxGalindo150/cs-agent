@@ -159,6 +159,14 @@ class ChatResponse(BaseModel):
         default=None,
         description="Set when this turn suspended on present_choice.",
     )
+    needs_human: bool = Field(
+        default=False,
+        description=(
+            "True when `reply` is a harness-level escalation (session already "
+            "flagged for a human, or a resumed turn ran out of iteration "
+            "budget) rather than an ordinary answer."
+        ),
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -200,4 +208,5 @@ async def chat(
         iterations=result.iterations,
         session_id=session_id,
         choice=ChoiceOut.model_validate(choice_segment) if choice_segment else None,
+        needs_human=result.needs_human,
     )

@@ -170,6 +170,7 @@ async def test_no_tool_turn_still_saves_meta(database: Database) -> None:
     result = await agent.respond(session_id, "hola")
 
     assert "Hola" in result.reply
+    assert result.needs_human is False
     meta = await _assistant_meta(database, session_id)
     assert meta is not None
     assert meta["gate"]["decision"] == "skip"
@@ -340,6 +341,7 @@ async def test_an_escalated_session_short_circuits_the_llm_entirely(
     assert result.iterations == 0
     assert result.tool_calls == []
     assert "human agent" in result.reply.lower()
+    assert result.needs_human is True
 
 
 async def test_an_escalated_sessions_message_is_still_persisted(
@@ -664,6 +666,7 @@ async def test_resuming_with_no_iteration_budget_left_escalates_to_human(
     result = await agent.respond(session_id, choice_id="card")
 
     assert "agente humano" in result.reply
+    assert result.needs_human is True
     async with database.session() as session:
         row = await SessionRepository(session).get_session(session_id)
     assert row is not None

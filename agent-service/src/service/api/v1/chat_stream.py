@@ -4,8 +4,8 @@
 deltas; here we bridge that to Server-Sent Events. The turn runs as a background
 task pushing events into a queue; the SSE generator drains it and yields
 ``session`` (the id, first, so the client can continue the thread), ``delta``
-(live text), the activity events below, then a terminal ``done`` (full reply)
-or ``error``.
+(live text), the activity events below, then a terminal ``done``
+(``{"reply", "needs_human"}``) or ``error``.
 
 Activity events exist so the UI can show what the turn is *doing* while it is
 still doing it, rather than a blank pause:
@@ -18,6 +18,9 @@ still doing it, rather than a blank pause:
 - ``choice``     — the turn paused on ``present_choice``
   (``{"prompt", "options"}``); the client should resend with ``choice_id`` (or
   free text) to resume, rather than treating the turn as finished.
+- ``done``       — terminal (``{"reply", "needs_human"}``); ``needs_human`` is
+  true when ``reply`` is a harness-level escalation (agent/loop/agent.py's
+  ``LoopResult.needs_human``) rather than an ordinary answer.
 
 ``tool_start``/``tool`` pair up by tool name in arrival order: the loop runs a
 batch concurrently, so N starts are emitted, then N results as they land.
@@ -124,7 +127,9 @@ async def chat_stream(
                 principal=principal,
                 images=images,
             )
-            queue.put_nowait(("done", result.reply))
+            queue.put_nowait(
+                ("done", {"reply": result.reply, "needs_human": result.needs_human})
+            )
         except anthropic.APIError as exc:
             # Mid-stream: headers are already sent, so surface the failure as an
             # SSE event (never a raw trace) instead of a 502.

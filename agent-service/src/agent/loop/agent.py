@@ -52,6 +52,16 @@ class LoopResult:
     # final answer); this is what lets a client render the tool activity
     # between the two sentences instead of hoisting it above both.
     segments: list[LoopEvent] = field(default_factory=list)
+    needs_human: bool = False
+    """Set by ``Agent`` (never by this loop itself) when ``reply`` is a
+    harness-level escalation rather than an ordinary answer — e.g. the
+    session was already flagged for a human, or a suspended turn ran out of
+    iteration budget on resume. Without this, ``ChatResponse``/the SSE
+    ``done`` event would carry the exact same machine-readable shape as any
+    other reply, leaving a client with no way to tell the two apart short of
+    string-matching the text. Not set when the *model* calls
+    ``escalate_to_human`` mid-turn and keeps answering — that case already
+    shows up in ``segments``/``tool_calls``."""
     suspended: dict[str, Any] | None = None
     """Set when this turn stopped on a suspending tool call (``Tool.suspends``)
     instead of a natural end — everything ``Agent.respond()`` needs to hand to

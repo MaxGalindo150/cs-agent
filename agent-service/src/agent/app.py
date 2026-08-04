@@ -355,7 +355,9 @@ class Agent:
                     },
                 )
                 self._tracer.end_turn(fixed, 0)
-                return LoopResult(reply=fixed, tool_calls=[], iterations=0)
+                return LoopResult(
+                    reply=fixed, tool_calls=[], iterations=0, needs_human=True
+                )
 
             # A suspended `present_choice` (agent/tools/registry.py's
             # Tool.suspends) takes over the whole turn — never build_system()
@@ -594,7 +596,7 @@ class Agent:
                 session_id, tool_use_id, matched["id"] if matched is not None else None
             )
             self._tracer.end_turn(reply, 0)
-            return LoopResult(reply=reply)
+            return LoopResult(reply=reply, needs_human=True)
 
         t0 = time.perf_counter()
         if matched is not None:

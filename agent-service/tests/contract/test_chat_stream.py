@@ -37,6 +37,7 @@ class _StreamAgent:
         self.received_images: list[Image] | None = None
         self.received_choice_id: str | None = None
         self.start_session_principal: Principal | None = None
+        self.needs_human: bool = False
 
     async def start_session(
         self, title: str | None = None, principal: Principal | None = None
@@ -61,7 +62,9 @@ class _StreamAgent:
         assert observer is not None
         observer("text", {"delta": "Hola"})
         observer("text", {"delta": " mundo"})
-        return LoopResult(reply="Hola mundo", iterations=1)
+        return LoopResult(
+            reply="Hola mundo", iterations=1, needs_human=self.needs_human
+        )
 
 
 @pytest.fixture
@@ -95,6 +98,28 @@ async def test_chat_stream_emits_session_then_deltas_then_done(
     # ...followed by a terminal done event carrying the full reply
     assert "event: done" in body
     assert "Hola mundo" in body
+
+
+async def test_chat_stream_done_event_carries_needs_human() -> None:
+    """A budget-exhausted resume (or an already-escalated session) looks like
+    an ordinary reply otherwise — `done`'s `needs_human` field is the only
+    machine-readable signal a streaming client has to tell them apart."""
+    app = create_app()
+    agent = _StreamAgent()
+    agent.needs_human = True
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    body = ""
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        async with c.stream(
+            "POST", "/v1/chat/stream", json={"message": "hola"}
+        ) as resp:
+            assert resp.status_code == 200
+            async for chunk in resp.aiter_text():
+                body += chunk
+
+    assert "event: done" in body
+    assert '"needs_human": true' in body
 
 
 async def test_chat_stream_accepts_identity_headers(
