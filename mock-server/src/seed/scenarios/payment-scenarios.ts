@@ -87,7 +87,7 @@ export const paymentNotReflected: Scenario = {
 
       const inst = installments[0]!;
       // El usuario tiene una referencia bancaria externa pero la cuota no se marcó como pagada
-      inst.externalReference = `REF_OK${id("").slice(0, 8).toUpperCase()}`;
+      inst.externalReference = `10${id("").slice(0, 10).replace(/[^0-9]/g, "").padStart(10, "0")}`;
       // Crear un registro de que el pago se recibió pero no se concilió
       db.transactions.push({
         id: id("txn"),
