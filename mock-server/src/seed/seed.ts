@@ -12,7 +12,7 @@ import {
   makeMerchants, makeUser, makeAddress, makePaymentMethod,
   makeCreditAccount, makeMembership, randomPointsForTier,
   generateOrder, recalcCreditAccount, recalcMembership,
-  makePendingPayment,
+  makePendingPayment, resetOrderIds,
 } from "./generators.js";
 import type { Installment } from "../schema/index.js";
 import { shipmentStuck } from "./scenarios/shipment-scenarios.js";
@@ -38,6 +38,7 @@ const DEMO_SCENARIOS = [shipmentStuck, doublePayment, failedPayment];
 export function runSeed(): Database {
   initFaker();
   resetIdCounter();
+  resetOrderIds();
   const db = createEmptyDB();
 
   // ── Merchants ──────────────────────────────────────────────

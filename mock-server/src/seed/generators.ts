@@ -331,6 +331,11 @@ interface OrderContext {
 /** IDs de orden ya generados en este seed — evita colisiones silenciosas. */
 const generatedOrderIds = new Set<string>();
 
+/** Resetea el Set de IDs — llamar al inicio de cada runSeed(). */
+export function resetOrderIds(): void {
+  generatedOrderIds.clear();
+}
+
 /** Genera un ID de orden numérico de 9 dígitos, garantizando unicidad dentro del seed. */
 function uniqueOrderId(): string {
   let candidate = f.string.numeric({ length: 9 });
