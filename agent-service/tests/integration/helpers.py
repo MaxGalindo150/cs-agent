@@ -94,6 +94,7 @@ def make_agent(
     chat_model: str = "fake-chat-model",
     fast_model: str = "fake-fast-model",
     trace_dir: Path | None = None,
+    max_iterations: int = 10,
 ) -> Agent:
     """Assemble a wired ``Agent`` over the test DB with a fake model injected.
 
@@ -112,4 +113,5 @@ def make_agent(
         chat_model=chat_model,
         fast_model=fast_model,
         trace_dir=trace_dir,
+        max_iterations=max_iterations,
     )

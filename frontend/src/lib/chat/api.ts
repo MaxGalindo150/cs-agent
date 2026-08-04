@@ -131,6 +131,10 @@ export async function streamChat({
   // Tracked so a turn that produced no deltas still renders: `done` carries the
   // full reply, and we fall back to it rather than leaving an empty bubble.
   let sawDelta = false;
+  // A pure-choice turn never streams any delta (the prompt is rendered by the
+  // choice widget, not as text) — without this, `done`'s no-delta fallback
+  // below would re-append the same prompt as a second, duplicate text part.
+  let renderedChoice = false;
 
   const handleFrame = (raw: string): boolean => {
     const { event, data } = parseSseEvent(raw);
@@ -168,8 +172,15 @@ export async function streamChat({
         return false;
       }
       case "choice": {
-        const { prompt, options } = payload as { prompt: string; options: ChoiceOption[] };
-        onChoice?.(prompt, options);
+        const { prompt, options: rawOptions } = payload as {
+          prompt: string;
+          options: unknown;
+        };
+        const options = optionsFromChoice(rawOptions);
+        if (typeof prompt === "string" && options.length > 0) {
+          onChoice?.(prompt, options);
+          renderedChoice = true;
+        }
         return false; // not terminal — the server still emits `done` right after
       }
       case "limit_reached": {
@@ -178,7 +189,7 @@ export async function streamChat({
       }
       case "done": {
         const full = String(payload);
-        if (!sawDelta && full) onDelta(full);
+        if (!sawDelta && !renderedChoice && full) onDelta(full);
         return true; // terminal
       }
       case "error":
@@ -282,7 +293,14 @@ function partsFromSegments(segments: unknown, fallbackContent: string): MessageP
       if (options.length > 0) {
         const resolvedOptionId =
           typeof seg.resolvedOptionId === "string" ? seg.resolvedOptionId : undefined;
-        parts.push({ type: "choice", prompt: seg.prompt, options, resolvedOptionId });
+        const resolved = seg.resolved === true ? true : undefined;
+        parts.push({
+          type: "choice",
+          prompt: seg.prompt,
+          options,
+          resolvedOptionId,
+          resolved,
+        });
       }
     }
   }

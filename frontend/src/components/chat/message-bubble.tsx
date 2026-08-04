@@ -83,6 +83,7 @@ export function MessageBubble({ message, onChoice, disableChoices }: MessageBubb
                   prompt={part.prompt}
                   options={part.options}
                   resolvedOptionId={part.resolvedOptionId}
+                  resolved={part.resolved}
                   onSelect={onChoice}
                   disabled={disableChoices}
                 />

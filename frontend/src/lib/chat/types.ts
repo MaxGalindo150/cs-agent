@@ -18,7 +18,18 @@ export type MessagePart =
   | { type: "text"; text: string }
   | { type: "steps"; steps: ActivityStep[] }
   | { type: "image"; previewUrl: string }
-  | { type: "choice"; prompt: string; options: ChoiceOption[]; resolvedOptionId?: string };
+  | {
+      type: "choice";
+      prompt: string;
+      options: ChoiceOption[];
+      /** Set once a specific option was clicked — settles on that option. */
+      resolvedOptionId?: string;
+      /** Set once the question is settled at all, by button OR free text —
+       *  independent of `resolvedOptionId`, which free text never sets.
+       *  Distinguishes "answered, no option to highlight" from "still
+       *  pending" without treating an empty string as a fake option id. */
+      resolved?: boolean;
+    };
 
 /** One clickable option in a `present_choice` prompt (agent-service's
  *  `agent/tools/implementations/present_choice.py`). */

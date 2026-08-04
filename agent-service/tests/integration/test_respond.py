@@ -610,3 +610,128 @@ async def test_an_image_never_leaks_into_a_suspended_turns_persisted_state(
     assert pending is not None
     first_entry_content = pending["turn_tail"][0]["content"]
     assert first_entry_content == "aquí mi comprobante\n[1 image attached]"
+
+
+async def test_a_malformed_suspended_payload_is_cleared_instead_of_wedging(
+    database: Database,
+) -> None:
+    """A row written by a different (or buggy) version of this code might not
+    match SuspendedToolUse's shape. This must degrade to "nothing pending" —
+    never a KeyError that leaves the suspension neither claimed nor resumed,
+    which would make every later turn in this conversation fail the same way
+    forever."""
+    session_id = await _new_session(database)
+    async with database.session() as session:
+        await SessionRepository(session).set_suspended_tool_use(
+            session_id, {"tool_use_id": "toolu_1"}
+        )
+    agent = make_agent(database, ScriptedClient([]))
+
+    result = await agent.respond(session_id, choice_id="card")
+
+    assert "already been answered" in result.reply
+    assert await _suspended_tool_use(database, session_id) is None
+
+
+async def test_resuming_with_no_iteration_budget_left_escalates_to_human(
+    database: Database,
+) -> None:
+    """The suspending call happened in the turn's only allowed iteration —
+    resuming would otherwise call run_loop with a non-positive budget and get
+    back its generic "iteration limit" reply, silently truncating instead of
+    escalating (CLAUDE.md's own budget rule). Only 2 scripted responses: if
+    resume mistakenly called the LLM again, ScriptedClient would raise."""
+    client = ScriptedClient(
+        [
+            response([_SKIP_GATE]),
+            response(
+                [
+                    tool_block(
+                        "present_choice",
+                        {"prompt": "¿Cómo prefieres?", "options": _CHOICE_OPTIONS},
+                    )
+                ],
+                "tool_use",
+            ),
+        ]
+    )
+    agent = make_agent(
+        database, client, tools=_present_choice_registry(), max_iterations=1
+    )
+    session_id = await _new_session(database)
+    await agent.respond(session_id, "quiero mi reembolso")
+
+    result = await agent.respond(session_id, choice_id="card")
+
+    assert "agente humano" in result.reply
+    async with database.session() as session:
+        row = await SessionRepository(session).get_session(session_id)
+    assert row is not None
+    assert row.escalated_at is not None
+    assert await _suspended_tool_use(database, session_id) is None
+
+
+async def test_a_second_suspension_right_after_the_first_does_not_orphan_a_tool_result(
+    database: Database,
+) -> None:
+    """Regression: asking a SECOND present_choice immediately after the first
+    resolves must not carry the first leg's tool_result into the second
+    suspension's turn_tail — its matching tool_use never survives into
+    session.history (persisted as plain text, not raw blocks), so replaying
+    it verbatim on the NEXT resume would leave an orphaned tool_result and the
+    API would reject the request with a 400."""
+    client = ScriptedClient(
+        [
+            response([_SKIP_GATE]),
+            response(
+                [
+                    tool_block(
+                        "present_choice",
+                        {"prompt": "¿Cómo prefieres?", "options": _CHOICE_OPTIONS},
+                        "toolu_a",
+                    )
+                ],
+                "tool_use",
+            ),
+            response(
+                [
+                    tool_block(
+                        "present_choice",
+                        {"prompt": "¿Qué monto?", "options": _CHOICE_OPTIONS},
+                        "toolu_b",
+                    )
+                ],
+                "tool_use",
+            ),
+            response([text_block("Listo.")]),
+        ]
+    )
+    agent = make_agent(database, client, tools=_present_choice_registry())
+    session_id = await _new_session(database)
+    await agent.respond(session_id, "quiero mi reembolso")
+
+    # Resolving the FIRST choice immediately triggers a SECOND present_choice
+    # (the 3rd scripted response) — this turn suspends again.
+    first_resume = await agent.respond(session_id, choice_id="card")
+    assert first_resume.reply == "¿Qué monto?"
+
+    # Resolving the SECOND choice must not 400 on an orphaned tool_result.
+    second_resume = await agent.respond(session_id, choice_id="card")
+    assert second_resume.reply == "Listo."
+
+    final_call_messages = client.messages.calls[-1]["messages"]
+    tool_use_ids_seen: set[str] = set()
+    for m in final_call_messages:
+        content = m.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                tool_use_ids_seen.add(block["id"])
+            elif block.get("type") == "tool_result":
+                assert block["tool_use_id"] in tool_use_ids_seen, (
+                    f"orphaned tool_result for {block['tool_use_id']!r}"
+                )
+    assert "toolu_b" in tool_use_ids_seen

@@ -142,14 +142,17 @@ export function useChat(options: UseChatOptions = {}): UseChat {
     [],
   );
 
-  /** Settle the most recent still-open `choice` part with the picked option
-   *  — so clicking a button visibly resolves it right away, without waiting
-   *  for a reload to show it as answered. */
-  const resolveChoice = useCallback((optionId: string) => {
+  /** Settle the most recent still-open `choice` part — so answering visibly
+   *  resolves it right away, without waiting for a reload to show it settled.
+   *  Called with an `optionId` when the customer clicked a button (highlights
+   *  that option); called with none when they typed free text instead
+   *  (settles the widget with nothing highlighted — mirrors the backend's
+   *  `mark_choice_resolved(..., resolved_option_id=None)`). */
+  const resolveChoice = useCallback((optionId?: string) => {
     setMessages((prev) => {
       const target = [...prev]
         .reverse()
-        .find((m) => m.parts.some((p) => p.type === "choice" && !p.resolvedOptionId));
+        .find((m) => m.parts.some((p) => p.type === "choice" && !p.resolved));
       if (!target) return prev;
       return prev.map((m) =>
         m.id !== target.id
@@ -157,8 +160,12 @@ export function useChat(options: UseChatOptions = {}): UseChat {
           : {
               ...m,
               parts: m.parts.map((p) =>
-                p.type === "choice" && !p.resolvedOptionId
-                  ? { ...p, resolvedOptionId: optionId }
+                p.type === "choice" && !p.resolved
+                  ? {
+                      ...p,
+                      resolved: true,
+                      ...(optionId ? { resolvedOptionId: optionId } : {}),
+                    }
                   : p,
               ),
             },
@@ -189,6 +196,11 @@ export function useChat(options: UseChatOptions = {}): UseChat {
     (text: string, images?: AttachedImage[]) => {
       const trimmed = text.trim();
       if (!trimmed || isStreaming) return;
+
+      // Typing instead of clicking still resolves any open choice widget —
+      // the backend clears the suspension either way, so the live UI must
+      // not keep showing those buttons as answerable.
+      resolveChoice();
 
       // Images render above the caption, like most chat apps — read as
       // "here's the picture, and here's what I'm saying about it".
@@ -271,6 +283,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       addStep,
       finishStep,
       addChoice,
+      resolveChoice,
       appendDelta,
       setConversation,
       onConversationUpdate,

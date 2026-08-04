@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import base64
 import uuid
-from typing import Any, Literal
+from typing import Literal
 
 import structlog
 from fastapi import APIRouter, Depends
@@ -100,6 +100,8 @@ class ChatRequest(BaseModel):
     message: str | None = Field(default=None, min_length=1, max_length=8000)
     choice_id: str | None = Field(
         default=None,
+        min_length=1,
+        max_length=128,
         description=(
             "Resolves a pending present_choice by option id — the customer "
             "clicked a button instead of typing. Exactly one of `message`/"
@@ -132,13 +134,30 @@ class ChatRequest(BaseModel):
         return self
 
 
+class ChoiceOption(BaseModel):
+    """One clickable option in a `present_choice` prompt."""
+
+    id: str
+    label: str
+
+
+class ChoiceOut(BaseModel):
+    """What the customer is being asked to pick between — validated (and
+    documented in the OpenAPI schema) instead of an untyped dict, so the
+    frontend's `ChoiceOption`/`MessagePart` types can't silently drift from
+    what this endpoint actually sends."""
+
+    prompt: str
+    options: list[ChoiceOption]
+
+
 class ChatResponse(BaseModel):
     reply: str
     iterations: int
     session_id: uuid.UUID
-    choice: dict[str, Any] | None = Field(
+    choice: ChoiceOut | None = Field(
         default=None,
-        description="{'prompt', 'options'} when this turn suspended on present_choice.",
+        description="Set when this turn suspended on present_choice.",
     )
 
 
@@ -173,12 +192,12 @@ async def chat(
         principal=principal,
         images=images,
     )
-    choice = next(
+    choice_segment = next(
         (seg for seg in reversed(result.segments) if seg.get("type") == "choice"), None
     )
     return ChatResponse(
         reply=result.reply,
         iterations=result.iterations,
         session_id=session_id,
-        choice=choice,
+        choice=ChoiceOut.model_validate(choice_segment) if choice_segment else None,
     )

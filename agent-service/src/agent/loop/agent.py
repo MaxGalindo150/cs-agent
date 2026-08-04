@@ -218,9 +218,9 @@ async def run_loop(
                 },
             )
             output = await tools.execute(call.name, call.input, ctx)
-            result.tool_calls.append(
-                {"tool": call.name, "args": args, "output": output}
-            )
+            event = {"tool": call.name, "args": args, "output": output}
+            result.tool_calls.append(event)
+            notify("tool", event)
             prompt = args.get("prompt", "")
             options = args.get("options", [])
             notify("choice", {"prompt": prompt, "options": options})

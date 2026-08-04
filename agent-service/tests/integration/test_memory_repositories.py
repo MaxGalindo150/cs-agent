@@ -462,7 +462,37 @@ async def test_mark_choice_resolved_patches_the_last_choice_segment(
     messages = await repo.list_messages(chat.id)
     assistant = [m for m in messages if m.role == "assistant"][-1]
     assert assistant.meta is not None
+    assert assistant.meta["segments"][-1]["resolved"] is True
     assert assistant.meta["segments"][-1]["resolvedOptionId"] == "card"
+
+
+async def test_mark_choice_resolved_with_no_option_id_settles_without_one(
+    db_session: AsyncSession,
+) -> None:
+    """Free text instead of a click: the question is still settled — no more
+    live buttons — but there's no specific option to highlight."""
+    repo = SessionRepository(db_session)
+    chat = await repo.create_session()
+    await repo.append_message(
+        chat.id,
+        "assistant",
+        "¿Reembolso o crédito?",
+        meta={
+            "tool_use_id": "toolu_1",
+            "segments": [
+                {"type": "choice", "prompt": "¿Reembolso o crédito?", "options": []}
+            ],
+        },
+    )
+
+    resolved = await repo.mark_choice_resolved(chat.id, "toolu_1", None)
+    assert resolved is True
+
+    messages = await repo.list_messages(chat.id)
+    assistant = [m for m in messages if m.role == "assistant"][-1]
+    assert assistant.meta is not None
+    assert assistant.meta["segments"][-1]["resolved"] is True
+    assert "resolvedOptionId" not in assistant.meta["segments"][-1]
 
 
 async def test_mark_choice_resolved_is_false_without_a_matching_tool_use_id(

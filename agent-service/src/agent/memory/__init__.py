@@ -195,6 +195,15 @@ class Memory:
             row = await SessionRepository(session).get_session(session_id)
             return row is not None and row.escalated_at is not None
 
+    async def mark_escalated(self, session_id: uuid.UUID, reason: str) -> bool:
+        """Flag a session for a human agent — the same deterministic write
+        ``escalate_to_human`` makes, exposed here so the harness itself can
+        escalate on its own initiative (e.g. running out of turns mid-resume)
+        without going through a model tool call. Returns ``False`` if it was
+        already escalated."""
+        async with self._db.session() as session:
+            return await SessionRepository(session).mark_escalated(session_id, reason)
+
     # ---- suspended tool calls (agent/tools/registry.py's Tool.suspends) ----
     async def set_suspended_tool_use(
         self, session_id: uuid.UUID, payload: dict[str, Any]
@@ -217,7 +226,7 @@ class Memory:
             )
 
     async def mark_choice_resolved(
-        self, session_id: uuid.UUID, tool_use_id: str, resolved_option_id: str
+        self, session_id: uuid.UUID, tool_use_id: str, resolved_option_id: str | None
     ) -> bool:
         async with self._db.session() as session:
             return await SessionRepository(session).mark_choice_resolved(

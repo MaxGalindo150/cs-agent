@@ -1,6 +1,6 @@
 # Investigación: integración con Intercom sin perder el widget propio
 
-> Estado: investigación (no ADR, no decisión tomada). Generado a partir de research puntual sobre las APIs públicas de Intercom (agosto 2026). Antes de implementar, validar con el equipo de cuenta de Intercom los puntos marcados como "managed availability" / plan requerido.
+> Estado: investigación (no ADR, no decisión tomada). Generado a partir de research puntual sobre las APIs de Intercom (agosto 2026). Ojo: los endpoints de Custom Channel Events (`notify_new_conversation`, `notify_new_message`, etc.) **no son parte de la API pública documentada** — están en "managed availability" bajo la versión `preview` (header `Intercom-Version: preview`, [ref](https://developers.intercom.com/docs/references/preview/rest-api/api.intercom.io/custom-channel-events/notifynewconversation)) y requieren acceso gestionado por el equipo de cuenta de Intercom, no son self-serve. Antes de implementar, validar con ese equipo los puntos marcados como "managed availability" / plan requerido.
 
 ## Objetivo
 
@@ -22,10 +22,10 @@ Con Custom Channel, Intercom trata nuestra integración "como cualquier otro can
 ## ✅ Lo que sí tenemos (es posible)
 
 - **Inbox compartido**: las conversaciones escaladas pueden aparecer en el inbox de Intercom con historial completo, para que un agente humano las trabaje ahí (asignación, macros, tags, reporting), sin tocar el widget del cliente.
-- **Flujo bidireccional básico**: crear una conversación desde nuestro backend (Custom Channel Events) cuando el `Agent` decide `needs_human`, y recibir las respuestas del agente humano vía webhook (`conversation.reply.created` / eventos de custom channel) para inyectarlas de vuelta en la sesión y mostrarlas en nuestro widget — mismo patrón que ya usamos para `choice_id`/`present_choice`.
+- **Flujo bidireccional básico**: crear una conversación desde nuestro backend (Custom Channel Events) cuando el `Agent` decide `needs_human`, y recibir las respuestas del agente humano vía el webhook estándar `conversation.admin.replied` (no existe un topic `conversation.reply.created` — ese nombre no es real) para inyectarlas de vuelta en la sesión y mostrarlas en nuestro widget — mismo patrón que ya usamos para `choice_id`/`present_choice`. Falta definir cómo el `conversation_id` de Intercom y el contenido de la respuesta se mapean de regreso a nuestro `session_id`/widget — probablemente vía un campo custom attribute o metadata guardado al crear la conversación.
 - **Mapeo de identidad**: Contacts API permite buscar/crear un `Contact` de Intercom a partir de nuestro `Principal`, para asociar la conversación al usuario correcto.
 - **Fin AI accesible vía API** ("Fin over API"): en teoría permite que Fin razone dentro de nuestra propia UI en lugar del Messenger de Intercom — pendiente de confirmar el detalle técnico exacto (ver bloqueantes abajo).
-- **Idempotencia estándar**: los webhooks de Intercom reintentan hasta 5 veces con backoff; se puede aplicar el mismo patrón de dedup que ya usamos (hash/ID único), no es un caso nuevo para nuestro harness.
+- **Idempotencia estándar**: el comportamiento real de los webhooks de Intercom es: 5 segundos de timeout de respuesta, 1 solo reintento (a los 1 minuto) si hay timeout o error; un `429` produce throttling (de 1 minuto hasta 2 horas, se descarta pasado ese límite); fallos repetidos pueden pausar o suspender la suscripción del webhook. La entrega es "at-least-once", así que puede llegar duplicado — se puede aplicar el mismo patrón de dedup que ya usamos (hash/ID único), usando el `id` de nivel superior del payload del webhook como clave, no es un caso nuevo para nuestro harness. ([ref](https://developers.intercom.com/docs/references/webhooks/webhook-models))
 - **Alternativa más liviana (Opción B)**: si no necesitamos threading en vivo bidireccional, se puede usar solo Conversations API + Contacts API "normales" (crear conversación al escalar, cerrar al resolver) — mucho menos integración, sin el gate de "managed availability" de Custom Channel.
 
 ## ❌ Lo que no es posible (o no confirmado)

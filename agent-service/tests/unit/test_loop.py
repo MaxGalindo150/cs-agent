@@ -400,6 +400,44 @@ async def test_suspending_tool_stops_the_loop_without_a_further_llm_call() -> No
     ]
 
 
+async def test_suspending_tool_emits_a_terminal_tool_event() -> None:
+    """`frontend/src/hooks/use-chat.ts` closes a running step only from a
+    `tool` event, matched by tool name to the `tool_start` that opened it — a
+    suspending call must get one too, or its step stays "running" forever in
+    the live transcript."""
+
+    async def present_choice(prompt: str, options: list[dict[str, str]]) -> str:
+        return "paused"
+
+    reg = ToolRegistry()
+    _register(reg, "present_choice", present_choice, suspends=True)
+
+    client = FakeClient(
+        [
+            _msg(
+                _tool_use("present_choice", {"prompt": "p?", "options": []}, "toolu_1"),
+                stop_reason="tool_use",
+            )
+        ]
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    await _run(
+        client,
+        "m",
+        "my-system",
+        [{"role": "user", "content": "hi"}],
+        reg,
+        observer=lambda kind, ev: events.append((kind, ev)),
+    )
+
+    kinds = [kind for kind, _ in events]
+    assert "tool_start" in kinds
+    assert "tool" in kinds
+    tool_event = next(ev for kind, ev in events if kind == "tool")
+    assert tool_event["tool"] == "present_choice"
+
+
 async def test_suspending_tool_keeps_lead_in_text_as_its_own_segment() -> None:
     async def present_choice(prompt: str, options: list[dict[str, str]]) -> str:
         return "paused"

@@ -119,12 +119,18 @@ class SessionRepository:
         return cast(CursorResult[Any], result).rowcount > 0
 
     async def mark_choice_resolved(
-        self, session_id: uuid.UUID, tool_use_id: str, resolved_option_id: str
+        self, session_id: uuid.UUID, tool_use_id: str, resolved_option_id: str | None
     ) -> bool:
         """Patch the suspended half-turn's persisted `choice` segment so any
         reload (this tab or another) renders it resolved — settled buttons,
         not live/re-clickable ones. This is what shrinks how often a stale
-        click can even happen in the first place."""
+        click can even happen in the first place.
+
+        ``resolved_option_id`` is ``None`` when the customer typed free text
+        instead of clicking: the question is still settled (no more live
+        buttons), just without a specific option to highlight — the renderer
+        tells these apart via ``resolved`` (always ``True`` here) vs whether
+        ``resolvedOptionId`` is present at all."""
         row = await self._db.scalar(
             select(ChatMessage)
             .where(
@@ -140,7 +146,9 @@ class SessionRepository:
         segments = list(row.meta["segments"])
         if not segments or segments[-1].get("type") != "choice":
             return False
-        segments[-1] = {**segments[-1], "resolvedOptionId": resolved_option_id}
+        segments[-1] = {**segments[-1], "resolved": True}
+        if resolved_option_id is not None:
+            segments[-1]["resolvedOptionId"] = resolved_option_id
         # Reassign the whole dict: `meta` is a plain JSONB column (no
         # MutableDict wrapper), so an in-place mutation wouldn't be tracked
         # and would silently fail to flush.

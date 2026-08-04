@@ -300,7 +300,10 @@ async def test_chat_surfaces_a_pending_choice_in_the_response() -> None:
         resp = await c.post("/v1/chat", json={"message": "hello"})
 
     assert resp.status_code == 200
-    assert resp.json()["choice"] == choice_segment
+    assert resp.json()["choice"] == {
+        "prompt": "¿Reembolso o crédito?",
+        "options": [{"id": "card", "label": "Tarjeta"}],
+    }
 
 
 async def test_chat_response_has_no_choice_field_for_an_ordinary_turn(

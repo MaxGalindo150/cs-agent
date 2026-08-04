@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import structlog
 from anthropic import AsyncAnthropic
 from anthropic.types import (
     MessageParam,
@@ -37,6 +38,7 @@ from anthropic.types import (
     ThinkingBlockParam,
     ToolUseBlockParam,
 )
+from pydantic import BaseModel, ValidationError
 
 from agent.identity import Principal
 from agent.loop.agent import LoopResult, run_loop
@@ -49,6 +51,8 @@ from agent.runtime.session import Session
 from agent.tools.context import ToolContext
 from agent.tools.registry import ToolRegistry
 from agent.vision import Image
+
+log = structlog.get_logger()
 
 # Keyed by the block's own "type" discriminant, not by its response-side
 # Python class — a streamed response can hand back a subclass (e.g.
@@ -127,11 +131,11 @@ def _serialize_tail(tail: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         blocks: list[Any] = []
         for block in content:
-            if not hasattr(block, "model_dump"):
+            if not isinstance(block, BaseModel):
                 blocks.append(block)
                 continue
             dumped = block.model_dump(mode="json")
-            allowed = _CONTENT_BLOCK_INPUT_KEYS.get(dumped.get("type"))
+            allowed = _CONTENT_BLOCK_INPUT_KEYS.get(dumped.get("type", ""))
             if allowed is not None:
                 dumped = {k: v for k, v in dumped.items() if k in allowed}
             blocks.append(dumped)
@@ -203,6 +207,25 @@ class AgentConfig:
     """Stamped into each turn's ``meta`` so a reopened thread records which
     provider answered. A single provider today; kept explicit for parity with
     Waku's multi-provider traces."""
+
+
+class SuspendedToolUse(BaseModel):
+    """Validated shape of ``chat_sessions.suspended_tool_use``.
+
+    Untrusted at this boundary — a free-form JSONB value that could have been
+    written by a previously deployed version of this code with a different
+    shape. Parsed once, here, rather than subscripting ``pending[...]`` field
+    by field: a malformed row must degrade to a fresh turn, not raise a
+    ``KeyError`` that leaves the suspension neither claimed nor resumed —
+    which would make ``peek_suspended_tool_use`` return that same unreadable
+    payload on every later turn, wedging the conversation permanently."""
+
+    tool_use_id: str
+    tool_name: str
+    turn_tail: list[dict[str, Any]]
+    system: str
+    payload: dict[str, Any]
+    iteration: int
 
 
 class Agent:
@@ -498,7 +521,23 @@ class Agent:
         next in that case. Every other outcome here is final (persistence and
         tracing already done).
         """
-        options = pending["payload"].get("options", [])
+        try:
+            state = SuspendedToolUse.model_validate(pending)
+        except ValidationError as exc:
+            # This version can't read the persisted shape — never let that
+            # wedge the conversation forever (see SuspendedToolUse's
+            # docstring). Best-effort clear: if `tool_use_id` itself didn't
+            # survive validation there's nothing left to key the claim on,
+            # and the next peek will just hit this same path again.
+            log.error(
+                "suspension.unreadable", session_id=str(session_id), error=str(exc)
+            )
+            stale_id = pending.get("tool_use_id")
+            if isinstance(stale_id, str):
+                await self._memory.claim_suspended_tool_use(session_id, stale_id)
+            return None
+
+        options = state.payload.get("options", [])
         matched = (
             next((o for o in options if o.get("id") == choice_id), None)
             if choice_id
@@ -517,27 +556,57 @@ class Agent:
         # Only claim (clear) the suspension once we're sure this request
         # actually resolves it — never as a side effect of merely checking.
         claimed = await self._memory.claim_suspended_tool_use(
-            session_id, pending["tool_use_id"]
+            session_id, state.tool_use_id
         )
         if not claimed:
             return None  # lost a race — caller decides what happens next
 
-        tool_use_id = pending["tool_use_id"]
+        tool_use_id = state.tool_use_id
+        logged_user_text = (
+            f"[selected option: {matched['label']}]"
+            if matched is not None
+            else (user_message or "")
+        )
+
+        # A hard budget, same as run_loop's own guardrail: if the question
+        # that suspended was already asked in this turn's last allowed
+        # iteration (or max_iterations shrank since), resuming would call the
+        # LLM with a non-positive budget and just return the generic
+        # "iteration limit" reply — silently truncating instead of escalating
+        # (CLAUDE.md §2.3). Escalate deterministically instead.
+        remaining_iterations = self._config.max_iterations - state.iteration
+        if remaining_iterations <= 0:
+            await self._memory.mark_escalated(
+                session_id, "Ran out of turns while resuming a paused question."
+            )
+            reply = (
+                "Necesito que un agente humano continúe con esto — ya quedó "
+                "marcado, en breve alguien te da seguimiento."
+            )
+            notify("text", {"delta": reply})
+            await session.add_exchange(
+                logged_user_text,
+                reply,
+                source=source,
+                meta={"segments": [{"type": "text", "text": reply}]},
+            )
+            await self._memory.mark_choice_resolved(
+                session_id, tool_use_id, matched["id"] if matched is not None else None
+            )
+            self._tracer.end_turn(reply, 0)
+            return LoopResult(reply=reply)
+
         t0 = time.perf_counter()
         if matched is not None:
-            system = pending["system"]
+            system = state.system
             resolution_text = f"The customer selected: {matched['label']}"
-            logged_user_text = f"[selected option: {matched['label']}]"
         else:
             assert user_message is not None  # guaranteed by the guard above
             user_id = ctx.principal.user_id if ctx.principal else None
             system = await session.build_system(user_message, user_id, notify=notify)
             resolution_text = user_message
-            logged_user_text = user_message
 
-        baseline = cast(
-            "list[MessageParam]", session.history[:-2] + pending["turn_tail"]
-        )
+        baseline = cast("list[MessageParam]", session.history[:-2] + state.turn_tail)
         history_len = len(baseline)
         messages = list(baseline) + [
             {
@@ -558,7 +627,7 @@ class Agent:
             system=system,
             messages=messages,
             tools=self._tools,
-            max_iterations=self._config.max_iterations - pending["iteration"],
+            max_iterations=remaining_iterations,
             max_tokens=self._config.max_tokens,
             observer=notify,
             stream=stream,
@@ -578,11 +647,21 @@ class Agent:
         }
 
         if result.suspended is not None:
-            # Asked another clarifying question right after this one resolved
-            # — persist it exactly like a fresh suspension, just with this
-            # leg's own tail instead of the whole turn's.
+            # Asked another clarifying question right after this one resolved.
+            # The new leg's tail must start the same way a FRESH suspension's
+            # does — a plain user-facing message, never the tool_result we
+            # just synthesized above: that tool_result's matching tool_use
+            # only exists in this one resume call's in-memory `messages`,
+            # never in the persisted (summarized-to-text) session.history:
+            # replaying it verbatim on the *next* resume would leave an
+            # orphaned tool_result with no preceding tool_use, and the API
+            # would reject the whole request with a 400.
+            resumed_leg_tail = [
+                {"role": "user", "content": logged_user_text},
+                *messages[history_len + 1 :],
+            ]
             result.suspended["turn_tail"] = _sanitize_tail(
-                _serialize_tail(cast("list[dict[str, Any]]", messages[history_len:])),
+                _serialize_tail(cast("list[dict[str, Any]]", resumed_leg_tail)),
                 logged_user_text,
             )
             meta["tool_use_id"] = result.suspended["tool_use_id"]
@@ -594,6 +673,13 @@ class Agent:
                 meta=meta,
             )
             await self._memory.set_suspended_tool_use(session_id, result.suspended)
+            # This leg's own question is answered too — just by one that
+            # immediately led to another, rather than a final reply. Settle
+            # it the same way, so a reload shows THIS leg's buttons resolved
+            # instead of still live.
+            await self._memory.mark_choice_resolved(
+                session_id, tool_use_id, matched["id"] if matched is not None else None
+            )
             self._tracer.end_turn(result.reply, result.iterations)
             return result
 
@@ -604,10 +690,11 @@ class Agent:
             source=source,
             meta=meta,
         )
-        if matched is not None:
-            await self._memory.mark_choice_resolved(
-                session_id, tool_use_id, matched["id"]
-            )
+        # Both paths settle the question: a click names the option, typed
+        # text only records that the buttons are no longer live.
+        await self._memory.mark_choice_resolved(
+            session_id, tool_use_id, matched["id"] if matched is not None else None
+        )
         self._tracer.end_turn(result.reply, result.iterations)
         return result
 
