@@ -51,16 +51,16 @@ function money(min: number, max: number): number {
 // ── Merchants ───────────────────────────────────────────────────────
 
 const MERCHANT_DATA: Array<{ name: string; category: string }> = [
-  { name: "TechHub Store", category: "electronics" },
-  { name: "Moda Urbana", category: "fashion" },
-  { name: "HomeComfort", category: "home" },
-  { name: "SportLife", category: "sports" },
-  { name: "BeautyBox", category: "beauty" },
-  { name: "GadgetZone", category: "electronics" },
-  { name: "KidsWorld", category: "toys" },
-  { name: "AutoParts Pro", category: "automotive" },
-  { name: "BookHaven", category: "books" },
-  { name: "GreenGarden", category: "garden" },
+  { name: "Cashea FCB", category: "electronics" },
+  { name: "Cashea C.C. Sambil Valencia", category: "electronics" },
+  { name: "Electrosak Catia La Mar", category: "electronics" },
+  { name: "Electrosak Maracay", category: "electronics" },
+  { name: "Rio Supermarket C.C. Plaza Mayor", category: "grocery" },
+  { name: "Rio Supermarket Puente Real", category: "grocery" },
+  { name: "Comeval Mercado Isabelica", category: "grocery" },
+  { name: "Palacio del Blumer Carmen Sur Goajiros Sta Rosa 2 Val", category: "grocery" },
+  { name: "Redu Av. 100 Plaza Bolivar Centro Valencia", category: "fashion" },
+  { name: "Tienda Glow C.C. Cristal", category: "beauty" },
 ];
 
 export function makeMerchants(): Merchant[] {
@@ -245,6 +245,15 @@ export function randomPointsForTier(): number {
 // ── Order lifecycle ────────────────────────────────────────────────
 
 const PRODUCT_CATALOG: Record<string, Array<{ name: string; priceRange: [number, number] }>> = {
+  grocery: [
+    { name: "Canasta Básica Familiar", priceRange: [15, 60] },
+    { name: "Ración Alimentaria (bulk)", priceRange: [8, 35] },
+    { name: "Harina P.A.N. 1kg x6", priceRange: [10, 25] },
+    { name: "Aceite Vegetal 1L x4", priceRange: [12, 30] },
+    { name: "Carne de Res 1kg", priceRange: [8, 20] },
+    { name: "Queso Blanco 500g x2", priceRange: [6, 18] },
+    { name: "Productos de Limpieza Set", priceRange: [10, 40] },
+  ],
   electronics: [
     { name: "Wireless Headphones Pro", priceRange: [80, 350] },
     { name: "Smart Watch Series 7", priceRange: [150, 500] },
@@ -387,7 +396,7 @@ export function generateOrder(
   }
 
   const order: Order = {
-    id: id("ord"),
+    id: f.string.numeric({ length: 9 }),
     userId: user.id,
     merchantId: merchant.id,
     merchantName: merchant.name,
