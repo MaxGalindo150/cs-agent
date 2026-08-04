@@ -18,6 +18,7 @@ from agent.tools.implementations.bnpl.orders import (
 from agent.tools.implementations.bnpl.transactions import make_get_transactions_tool
 from agent.tools.implementations.escalation import make_escalate_to_human_tool
 from agent.tools.implementations.memory import make_manage_memory_tool
+from agent.tools.implementations.present_choice import make_present_choice_tool
 from agent.tools.registry import ToolRegistry
 
 
@@ -30,4 +31,5 @@ def build_registry(bnpl_client: httpx.AsyncClient, db: Database) -> ToolRegistry
     registry.register(make_get_transactions_tool(bnpl_client))
     registry.register(make_manage_memory_tool(db))
     registry.register(make_escalate_to_human_tool(db))
+    registry.register(make_present_choice_tool())
     return registry

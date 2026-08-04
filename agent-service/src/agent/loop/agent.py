@@ -52,6 +52,13 @@ class LoopResult:
     # final answer); this is what lets a client render the tool activity
     # between the two sentences instead of hoisting it above both.
     segments: list[LoopEvent] = field(default_factory=list)
+    suspended: dict[str, Any] | None = None
+    """Set when this turn stopped on a suspending tool call (``Tool.suspends``)
+    instead of a natural end — everything ``Agent.respond()`` needs to hand to
+    ``SessionRepository.set_suspended_tool_use``:
+    ``{tool_use_id, tool_name, system, payload, iteration}``. ``turn_tail`` is
+    filled in by the caller, which knows where ``session.history`` ends within
+    ``messages`` — this loop doesn't."""
 
 
 async def run_loop(
@@ -154,6 +161,87 @@ async def run_loop(
         # segment now, before the tool group, so it keeps its place in order.
         if text:
             result.segments.append({"type": "text", "text": text})
+
+        # ---- guardrail 2 (sort of): a suspending tool call pauses the turn.
+        # `present_choice` is the first of these — the loop must not call the
+        # LLM again this iteration, or the model would have to guess what the
+        # customer will answer instead of actually waiting for it.
+        suspending = [c for c in tool_uses if tools.suspends(c.name)]
+
+        if suspending and len(tool_uses) > 1:
+            # Anthropic requires every tool_use in this message to get a
+            # tool_result before the message list is valid again, and a
+            # suspending call can't share a batch with others (nothing here
+            # could stay "pending" while its batch-mates already got real
+            # results) — refuse the whole batch rather than run some tools and
+            # strand the rest.
+            refusals: list[ToolResultBlockParam] = [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": c.id,
+                    "content": (
+                        f"Error: {c.name} must be the only tool call in its "
+                        "turn when a suspending tool is involved — retry it "
+                        "alone."
+                    ),
+                }
+                for c in tool_uses
+            ]
+            messages.append({"role": "user", "content": refusals})
+            result.segments.append(
+                {
+                    "type": "tools",
+                    "calls": [
+                        {
+                            "tool": c.name,
+                            "args": c.input,
+                            "output": r["content"],
+                            "label": tools.label(
+                                c.name, cast("dict[str, Any]", c.input)
+                            ),
+                        }
+                        for c, r in zip(tool_uses, refusals, strict=True)
+                    ],
+                }
+            )
+            continue
+
+        if suspending:
+            call = suspending[0]  # exactly one — the mixed-batch case above handles >1
+            args = cast("dict[str, Any]", call.input)
+            notify(
+                "tool_start",
+                {
+                    "tool": call.name,
+                    "args": args,
+                    "label": tools.label(call.name, args),
+                },
+            )
+            output = await tools.execute(call.name, call.input, ctx)
+            result.tool_calls.append(
+                {"tool": call.name, "args": args, "output": output}
+            )
+            prompt = args.get("prompt", "")
+            options = args.get("options", [])
+            notify("choice", {"prompt": prompt, "options": options})
+            result.segments.append(
+                {"type": "choice", "prompt": prompt, "options": options}
+            )
+            result.suspended = {
+                "tool_use_id": call.id,
+                "tool_name": call.name,
+                "system": system,
+                "payload": args,
+                "iteration": iteration,
+            }
+            # Lead-in text (if any) plus the prompt itself — this is the
+            # customer-facing reply for this half of the turn, same idea as
+            # the no-tool-calls case joining every text segment.
+            texts = [seg["text"] for seg in result.segments if seg["type"] == "text"]
+            if prompt:
+                texts.append(prompt)
+            result.reply = "\n\n".join(texts)
+            return result
 
         # ---- act: execute requested tools concurrently; observe: feed back.
         # Tools are independent (no shared mutable state in the registry), so a

@@ -23,6 +23,7 @@
 import type {
   ActivityStep,
   AttachedImage,
+  ChoiceOption,
   ConversationSummary,
   Message,
   MessagePart,
@@ -32,8 +33,14 @@ import type {
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export interface StreamChatOptions {
-  message: string;
-  /** Continue an existing conversation. Omit to start a new one. */
+  /** The text to send. Exactly one of `message`/`choiceId` must be set. */
+  message?: string;
+  /** Resolves a pending `present_choice` by option id — the customer clicked
+   *  a button instead of typing. Exactly one of `message`/`choiceId` must be
+   *  set. */
+  choiceId?: string;
+  /** Continue an existing conversation. Omit to start a new one — required
+   *  when `choiceId` is set (there's no pending choice without one). */
   conversationId?: string;
   /** Images attached as context for this turn only — never replayed on later
    *  turns (see AttachedImage). */
@@ -61,6 +68,10 @@ export interface StreamChatOptions {
   onToolStart?: (tool: string, label: string) => void;
   /** Called when a tool finishes, with its (truncated) result. */
   onTool?: (event: ToolEvent) => void;
+  /** Called when the turn paused on `present_choice` — the client should
+   *  render buttons and resume with `choiceId` (or free text) rather than
+   *  treating the turn as finished. */
+  onChoice?: (prompt: string, options: ChoiceOption[]) => void;
   /** Called when the agent hit a budget guard (max turns / tool calls). */
   onLimitReached?: (detail: unknown) => void;
   /** Lets the caller cancel the request (e.g. a stop button or unmount). */
@@ -74,6 +85,7 @@ export interface StreamChatOptions {
  */
 export async function streamChat({
   message,
+  choiceId,
   conversationId,
   images,
   principal,
@@ -82,6 +94,7 @@ export async function streamChat({
   onGate,
   onToolStart,
   onTool,
+  onChoice,
   onLimitReached,
   signal,
 }: StreamChatOptions): Promise<void> {
@@ -94,8 +107,11 @@ export async function streamChat({
     headers,
     // `session_id: undefined` is dropped by JSON.stringify, so a new
     // conversation sends just `{ message }` and the server mints an id.
+    // Exactly one of `message`/`choice_id` is sent — the server 422s if both
+    // or neither arrive (agent-service's ChatRequest validator).
     body: JSON.stringify({
       message,
+      choice_id: choiceId,
       session_id: conversationId,
       images: images?.map((img) => ({ media_type: img.mediaType, data: img.data })),
     }),
@@ -150,6 +166,11 @@ export async function streamChat({
       case "tool": {
         onTool?.(payload as ToolEvent);
         return false;
+      }
+      case "choice": {
+        const { prompt, options } = payload as { prompt: string; options: ChoiceOption[] };
+        onChoice?.(prompt, options);
+        return false; // not terminal — the server still emits `done` right after
       }
       case "limit_reached": {
         onLimitReached?.(payload);
@@ -256,9 +277,27 @@ function partsFromSegments(segments: unknown, fallbackContent: string): MessageP
     } else if (seg.type === "tools" && Array.isArray(seg.calls)) {
       const steps = stepsFromCalls(seg.calls);
       if (steps.length > 0) parts.push({ type: "steps", steps });
+    } else if (seg.type === "choice" && typeof seg.prompt === "string") {
+      const options = optionsFromChoice(seg.options);
+      if (options.length > 0) {
+        const resolvedOptionId =
+          typeof seg.resolvedOptionId === "string" ? seg.resolvedOptionId : undefined;
+        parts.push({ type: "choice", prompt: seg.prompt, options, resolvedOptionId });
+      }
     }
   }
   return parts.length > 0 ? parts : fallback;
+}
+
+function optionsFromChoice(raw: unknown): ChoiceOption[] {
+  if (!Array.isArray(raw)) return [];
+  const options: ChoiceOption[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const { id, label } = entry as Record<string, unknown>;
+    if (typeof id === "string" && typeof label === "string") options.push({ id, label });
+  }
+  return options;
 }
 
 function stepsFromCalls(calls: unknown[]): ActivityStep[] {

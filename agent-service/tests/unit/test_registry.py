@@ -113,6 +113,35 @@ def test_registry_labels_an_unregistered_tool() -> None:
     assert ToolRegistry().label("get_order", {"order_id": "x"}) == "Getting order"
 
 
+def test_suspends_defaults_to_false() -> None:
+    reg = ToolRegistry()
+    reg.register(_tool("echo", _noop))
+
+    assert reg.suspends("echo") is False
+
+
+def test_suspends_reflects_a_tool_flagged_true() -> None:
+    reg = ToolRegistry()
+    reg.register(
+        Tool(
+            name="present_choice",
+            description="d",
+            input_schema=_SCHEMA,
+            fn=_noop,
+            suspends=True,
+        )
+    )
+
+    assert reg.suspends("present_choice") is True
+
+
+def test_suspends_is_false_for_an_unknown_tool() -> None:
+    """Same default-safe shape as `label` — the loop announces a call before
+    `execute` can reject it, so an unrecognised name must not accidentally
+    suspend the turn."""
+    assert ToolRegistry().suspends("nope") is False
+
+
 async def test_identity_gated_tool_is_refused_without_a_principal() -> None:
     ran: list[ToolContext | None] = []
 

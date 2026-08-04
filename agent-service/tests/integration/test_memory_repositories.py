@@ -341,6 +341,165 @@ async def test_mark_escalated_on_an_unknown_session_is_a_no_op(
     assert changed is False
 
 
+# --- suspended tool calls (agent/tools/registry.py's Tool.suspends) --------
+
+
+async def test_peek_reads_a_pending_suspension_without_clearing_it(
+    database: Database,
+) -> None:
+    payload = {"tool_use_id": "toolu_1", "tool_name": "present_choice"}
+    async with database.session() as session:
+        chat = await SessionRepository(session).create_session()
+        chat_id = chat.id
+        await SessionRepository(session).set_suspended_tool_use(chat_id, payload)
+
+    async with database.session() as session:
+        peeked = await SessionRepository(session).peek_suspended_tool_use(chat_id)
+    assert peeked == payload
+
+    # A mere read must never consume it — a second peek sees the same thing.
+    async with database.session() as session:
+        peeked_again = await SessionRepository(session).peek_suspended_tool_use(chat_id)
+    assert peeked_again == payload
+
+
+async def test_peek_on_a_session_with_nothing_pending_is_none(
+    db_session: AsyncSession,
+) -> None:
+    chat = await SessionRepository(db_session).create_session()
+
+    assert await SessionRepository(db_session).peek_suspended_tool_use(chat.id) is None
+
+
+async def test_claim_clears_the_suspension_when_the_tool_use_id_matches(
+    database: Database,
+) -> None:
+    async with database.session() as session:
+        chat = await SessionRepository(session).create_session()
+        chat_id = chat.id
+        await SessionRepository(session).set_suspended_tool_use(
+            chat_id, {"tool_use_id": "toolu_1"}
+        )
+
+    async with database.session() as session:
+        claimed = await SessionRepository(session).claim_suspended_tool_use(
+            chat_id, "toolu_1"
+        )
+    assert claimed is True
+
+    async with database.session() as session:
+        assert await SessionRepository(session).peek_suspended_tool_use(chat_id) is None
+
+
+async def test_claim_is_a_no_op_when_the_tool_use_id_does_not_match(
+    database: Database,
+) -> None:
+    """A stale/garbage id must never destroy a still-live suspension — the
+    guard lives in the WHERE, not a separate read-then-write."""
+    payload = {"tool_use_id": "toolu_1"}
+    async with database.session() as session:
+        chat = await SessionRepository(session).create_session()
+        chat_id = chat.id
+        await SessionRepository(session).set_suspended_tool_use(chat_id, payload)
+
+    async with database.session() as session:
+        claimed = await SessionRepository(session).claim_suspended_tool_use(
+            chat_id, "toolu_wrong"
+        )
+    assert claimed is False
+
+    async with database.session() as session:
+        assert (
+            await SessionRepository(session).peek_suspended_tool_use(chat_id) == payload
+        )
+
+
+async def test_claim_is_idempotent_a_second_claim_returns_false(
+    database: Database,
+) -> None:
+    """Guards the double-submit/retry race: whichever request claims it first
+    wins, the other must not resume/persist anything a second time."""
+    async with database.session() as session:
+        chat = await SessionRepository(session).create_session()
+        chat_id = chat.id
+        await SessionRepository(session).set_suspended_tool_use(
+            chat_id, {"tool_use_id": "toolu_1"}
+        )
+    async with database.session() as session:
+        first = await SessionRepository(session).claim_suspended_tool_use(
+            chat_id, "toolu_1"
+        )
+    assert first is True
+
+    async with database.session() as session:
+        second = await SessionRepository(session).claim_suspended_tool_use(
+            chat_id, "toolu_1"
+        )
+    assert second is False
+
+
+async def test_mark_choice_resolved_patches_the_last_choice_segment(
+    db_session: AsyncSession,
+) -> None:
+    repo = SessionRepository(db_session)
+    chat = await repo.create_session()
+    await repo.append_message(chat.id, "user", "necesito ayuda")
+    await repo.append_message(
+        chat.id,
+        "assistant",
+        "¿Reembolso o crédito?",
+        meta={
+            "tool_use_id": "toolu_1",
+            "segments": [
+                {"type": "choice", "prompt": "¿Reembolso o crédito?", "options": []}
+            ],
+        },
+    )
+
+    resolved = await repo.mark_choice_resolved(chat.id, "toolu_1", "card")
+    assert resolved is True
+
+    messages = await repo.list_messages(chat.id)
+    assistant = [m for m in messages if m.role == "assistant"][-1]
+    assert assistant.meta is not None
+    assert assistant.meta["segments"][-1]["resolvedOptionId"] == "card"
+
+
+async def test_mark_choice_resolved_is_false_without_a_matching_tool_use_id(
+    db_session: AsyncSession,
+) -> None:
+    repo = SessionRepository(db_session)
+    chat = await repo.create_session()
+    await repo.append_message(
+        chat.id,
+        "assistant",
+        "hola",
+        meta={"tool_use_id": "toolu_1", "segments": [{"type": "text", "text": "hola"}]},
+    )
+
+    assert await repo.mark_choice_resolved(chat.id, "toolu_other", "card") is False
+
+
+async def test_mark_choice_resolved_is_false_when_last_segment_is_not_a_choice(
+    db_session: AsyncSession,
+) -> None:
+    """Defensive: a stale tool_use_id lingering in meta from an old (already
+    resolved, superseded) suspension must not corrupt a later text segment."""
+    repo = SessionRepository(db_session)
+    chat = await repo.create_session()
+    await repo.append_message(
+        chat.id,
+        "assistant",
+        "gracias, eso es todo",
+        meta={
+            "tool_use_id": "toolu_1",
+            "segments": [{"type": "text", "text": "gracias, eso es todo"}],
+        },
+    )
+
+    assert await repo.mark_choice_resolved(chat.id, "toolu_1", "card") is False
+
+
 # --- facts (semantic memory) -----------------------------------------------
 
 

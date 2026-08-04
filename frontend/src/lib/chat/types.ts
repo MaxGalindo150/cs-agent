@@ -17,7 +17,15 @@ export type Role = "user" | "assistant";
 export type MessagePart =
   | { type: "text"; text: string }
   | { type: "steps"; steps: ActivityStep[] }
-  | { type: "image"; previewUrl: string };
+  | { type: "image"; previewUrl: string }
+  | { type: "choice"; prompt: string; options: ChoiceOption[]; resolvedOptionId?: string };
+
+/** One clickable option in a `present_choice` prompt (agent-service's
+ *  `agent/tools/implementations/present_choice.py`). */
+export interface ChoiceOption {
+  id: string;
+  label: string;
+}
 
 export interface Message {
   id: string;

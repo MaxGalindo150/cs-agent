@@ -15,6 +15,9 @@ still doing it, rather than a blank pause:
   written by the tool itself (``agent.tools.registry.Tool.progress_label``), so
   the client renders progress without knowing which tools exist.
 - ``tool``       — that tool finished (``{"tool", "args", "output"}``).
+- ``choice``     — the turn paused on ``present_choice``
+  (``{"prompt", "options"}``); the client should resend with ``choice_id`` (or
+  free text) to resume, rather than treating the turn as finished.
 
 ``tool_start``/``tool`` pair up by tool name in arrival order: the loop runs a
 batch concurrently, so N starts are emitted, then N results as they land.
@@ -61,10 +64,16 @@ async def chat_stream(
     )
 
     # New conversation → mint a session up front (before any bytes are
-    # streamed), titled with the message that opened it.
-    session_id = req.session_id or await agent.start_session(
-        session_title(req.message), principal=principal
-    )
+    # streamed), titled with the message that opened it. `choice_id` requires
+    # an existing `session_id` (the validator enforces it), so `req.message`
+    # is guaranteed set whenever this branch runs.
+    if req.session_id is None:
+        assert req.message is not None
+        session_id = await agent.start_session(
+            session_title(req.message), principal=principal
+        )
+    else:
+        session_id = req.session_id
     queue: asyncio.Queue[Any] = asyncio.Queue()
 
     def observer(kind: str, event: dict[str, Any]) -> None:
@@ -94,6 +103,10 @@ async def chat_stream(
                     },
                 )
             )
+        elif kind == "choice":
+            queue.put_nowait(
+                ("choice", {"prompt": event["prompt"], "options": event["options"]})
+            )
         elif kind == "limit_reached":
             queue.put_nowait(("limit_reached", event))
 
@@ -104,6 +117,7 @@ async def chat_stream(
             result = await agent.respond(
                 session_id,
                 req.message,
+                choice_id=req.choice_id,
                 observer=observer,
                 source="api",
                 stream=True,

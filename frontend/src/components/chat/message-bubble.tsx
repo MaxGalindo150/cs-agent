@@ -1,9 +1,16 @@
+import { ChoicePrompt } from "@/components/chat/choice-prompt";
 import { Markdown } from "@/components/chat/markdown";
 import { ToolActivity } from "@/components/chat/tool-activity";
 import type { Message } from "@/lib/chat/types";
 
 interface MessageBubbleProps {
   message: Message;
+  /** Resolve a pending `present_choice` by option id. Omitted (or ignored via
+   *  `disableChoices`) while a turn is already streaming. */
+  onChoice?: (optionId: string) => void;
+  /** True while any turn is in flight — disables live choice buttons so a
+   *  double-click can't submit twice. */
+  disableChoices?: boolean;
 }
 
 /** A single chat turn. User messages are right-aligned bubbles; assistant
@@ -14,7 +21,7 @@ interface MessageBubbleProps {
  *  call above the whole reply. That is what lets "I'll escalate this" ->
  *  [escalating…] -> "Done" read as one sequence instead of the agent
  *  seemingly talking to itself. */
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onChoice, disableChoices }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
   if (isUser) {
@@ -60,15 +67,28 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             // `image` parts only ever occur on a user turn (see AttachedImage) —
             // an assistant turn never attaches one, so there's nothing to render.
             if (part.type === "image") return null;
-            return part.type === "steps" ? (
-              <ToolActivity
-                key={i}
-                steps={part.steps}
-                streaming={message.streaming && i === lastIndex}
-              />
-            ) : (
-              <Markdown key={i}>{part.text}</Markdown>
-            );
+            if (part.type === "steps") {
+              return (
+                <ToolActivity
+                  key={i}
+                  steps={part.steps}
+                  streaming={message.streaming && i === lastIndex}
+                />
+              );
+            }
+            if (part.type === "choice") {
+              return (
+                <ChoicePrompt
+                  key={i}
+                  prompt={part.prompt}
+                  options={part.options}
+                  resolvedOptionId={part.resolvedOptionId}
+                  onSelect={onChoice}
+                  disabled={disableChoices}
+                />
+              );
+            }
+            return <Markdown key={i}>{part.text}</Markdown>;
           })}
           {message.streaming && <StreamingCursor />}
         </>

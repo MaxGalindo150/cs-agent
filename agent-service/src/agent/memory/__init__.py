@@ -194,3 +194,32 @@ class Memory:
         async with self._db.session() as session:
             row = await SessionRepository(session).get_session(session_id)
             return row is not None and row.escalated_at is not None
+
+    # ---- suspended tool calls (agent/tools/registry.py's Tool.suspends) ----
+    async def set_suspended_tool_use(
+        self, session_id: uuid.UUID, payload: dict[str, Any]
+    ) -> None:
+        async with self._db.session() as session:
+            await SessionRepository(session).set_suspended_tool_use(session_id, payload)
+
+    async def peek_suspended_tool_use(
+        self, session_id: uuid.UUID
+    ) -> dict[str, Any] | None:
+        async with self._db.session() as session:
+            return await SessionRepository(session).peek_suspended_tool_use(session_id)
+
+    async def claim_suspended_tool_use(
+        self, session_id: uuid.UUID, tool_use_id: str
+    ) -> bool:
+        async with self._db.session() as session:
+            return await SessionRepository(session).claim_suspended_tool_use(
+                session_id, tool_use_id
+            )
+
+    async def mark_choice_resolved(
+        self, session_id: uuid.UUID, tool_use_id: str, resolved_option_id: str
+    ) -> bool:
+        async with self._db.session() as session:
+            return await SessionRepository(session).mark_choice_resolved(
+                session_id, tool_use_id, resolved_option_id
+            )

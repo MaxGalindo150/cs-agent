@@ -29,7 +29,7 @@ export function Chat({ variant = "page" }: ChatProps) {
   const isWidget = variant === "widget";
   const { conversations, refresh } = useConversations();
   const { activeUser } = useIdentity();
-  const { messages, isStreaming, conversationId, send, stop, reset, load } =
+  const { messages, isStreaming, conversationId, send, sendChoice, stop, reset, load } =
     useChat({
       onConversationUpdate: refresh,
       principal: activeUser
@@ -91,7 +91,12 @@ export function Chat({ variant = "page" }: ChatProps) {
 
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 py-6">
-            <MessageList messages={messages} onSuggestion={send} />
+            <MessageList
+              messages={messages}
+              onSuggestion={send}
+              onChoice={sendChoice}
+              disableChoices={isStreaming}
+            />
           </div>
         </div>
 
