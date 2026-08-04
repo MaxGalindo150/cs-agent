@@ -51,16 +51,16 @@ function money(min: number, max: number): number {
 // ── Merchants ───────────────────────────────────────────────────────
 
 const MERCHANT_DATA: Array<{ name: string; category: string }> = [
-  { name: "TechHub Store", category: "electronics" },
-  { name: "Moda Urbana", category: "fashion" },
-  { name: "HomeComfort", category: "home" },
-  { name: "SportLife", category: "sports" },
-  { name: "BeautyBox", category: "beauty" },
-  { name: "GadgetZone", category: "electronics" },
-  { name: "KidsWorld", category: "toys" },
-  { name: "AutoParts Pro", category: "automotive" },
-  { name: "BookHaven", category: "books" },
-  { name: "GreenGarden", category: "garden" },
+  { name: "Cashea FCB", category: "electronics" },
+  { name: "Cashea C.C. Sambil Valencia", category: "electronics" },
+  { name: "Electrosak Catia La Mar", category: "electronics" },
+  { name: "Electrosak Maracay", category: "electronics" },
+  { name: "Rio Supermarket C.C. Plaza Mayor", category: "grocery" },
+  { name: "Rio Supermarket Puente Real", category: "grocery" },
+  { name: "Comeval Mercado Isabelica", category: "grocery" },
+  { name: "Palacio del Blumer Carmen Sur Goajiros Sta Rosa 2 Val", category: "grocery" },
+  { name: "Redu Av. 100 Plaza Bolivar Centro Valencia", category: "fashion" },
+  { name: "Tienda Glow C.C. Cristal", category: "beauty" },
 ];
 
 export function makeMerchants(): Merchant[] {
@@ -94,7 +94,7 @@ export function makeUser(overrides: UserOverrides = {}): User {
   return {
     id: id("usr"),
     email: overrides.email ?? f.internet.email({ firstName, lastName }).toLowerCase(),
-    phone: overrides.phone ?? f.phone.number(),
+    phone: overrides.phone ?? vePhone(),
     firstName,
     lastName,
     dob: new Date(f.date.birthdate({ min: 18, max: 75 })).toISOString(),
@@ -110,17 +110,66 @@ export function makeUser(overrides: UserOverrides = {}): User {
   };
 }
 
+// ── Data venezolana ─────────────────────────────────────────────────
+
+const VE_CITIES: Array<{ city: string; state: string }> = [
+  { city: "Caracas", state: "Distrito Capital" },
+  { city: "Maracaibo", state: "Zulia" },
+  { city: "Valencia", state: "Carabobo" },
+  { city: "Maracay", state: "Aragua" },
+  { city: "Barquisimeto", state: "Lara" },
+  { city: "Mérida", state: "Mérida" },
+  { city: "San Cristóbal", state: "Táchira" },
+  { city: "Ciudad Bolívar", state: "Bolívar" },
+  { city: "Puerto La Cruz", state: "Anzoátegui" },
+  { city: "Punto Fijo", state: "Falcón" },
+];
+
+const VE_BANKS = [
+  "Banco de Venezuela",
+  "Banco Nacional de Crédito",
+  "Banco Mercantil",
+  "Banco Provincial (BBVA)",
+  "Banesco",
+  "Banco Sofitasa C.A.",
+  "Banco Exterior",
+  "Banco Bicentenario",
+  "Bancaribe",
+  "Banco del Tesoro",
+];
+
+const VE_MOBILE_PREFIXES = ["412", "414", "424", "416", "426"];
+
+/** Genera un teléfono venezolano: +58 4XX XXXXXXX */
+function vePhone(): string {
+  const prefix = f.helpers.arrayElement(VE_MOBILE_PREFIXES);
+  const rest = f.string.numeric({ length: 7 });
+  return `+58${prefix}${rest}`;
+}
+
+/** Genera una cédula venezolana: V-XXXXXXX (7-8 dígitos) */
+function veCedula(): string {
+  const digits = f.string.numeric({ length: f.helpers.arrayElement([7, 8]) });
+  return `V-${digits}`;
+}
+
+/** Genera una referencia bancaria venezolana: 8-12 dígitos numéricos */
+function veBankReference(): string {
+  return f.string.numeric({ length: f.helpers.arrayElement([8, 10, 12]) });
+}
+
 export function makeAddress(userId: string): Address {
+  const loc = f.helpers.arrayElement(VE_CITIES);
   return {
     id: id("addr"),
     userId,
     type: f.helpers.arrayElement(["shipping", "billing"]),
     line1: f.location.streetAddress(),
     line2: f.helpers.maybe(() => f.location.secondaryAddress(), { probability: 0.3 }) ?? null,
-    city: f.location.city(),
-    state: f.location.state(),
-    zip: f.location.zipCode(),
-    country: "MX",
+    city: loc.city,
+    state: loc.state,
+    zip: f.string.numeric({ length: 4 }),
+    country: "VE",
     isDefault: false,
     createdAt: isoDaysAgo(randInt(30, 730)),
   };
@@ -147,7 +196,7 @@ export function makePaymentMethod(userId: string): PaymentMethod {
     userId,
     type: "bank_account",
     brand: null,
-    bankName: pick(["BBVA", "Santander", "Banamex", "Banorte", "NU"]),
+    bankName: f.helpers.arrayElement(VE_BANKS),
     last4: f.string.numeric({ length: 4 }),
     expiryMonth: null,
     expiryYear: null,
@@ -196,6 +245,15 @@ export function randomPointsForTier(): number {
 // ── Order lifecycle ────────────────────────────────────────────────
 
 const PRODUCT_CATALOG: Record<string, Array<{ name: string; priceRange: [number, number] }>> = {
+  grocery: [
+    { name: "Canasta Básica Familiar", priceRange: [15, 60] },
+    { name: "Ración Alimentaria (bulk)", priceRange: [8, 35] },
+    { name: "Harina P.A.N. 1kg x6", priceRange: [10, 25] },
+    { name: "Aceite Vegetal 1L x4", priceRange: [12, 30] },
+    { name: "Carne de Res 1kg", priceRange: [8, 20] },
+    { name: "Queso Blanco 500g x2", priceRange: [6, 18] },
+    { name: "Productos de Limpieza Set", priceRange: [10, 40] },
+  ],
   electronics: [
     { name: "Wireless Headphones Pro", priceRange: [80, 350] },
     { name: "Smart Watch Series 7", priceRange: [150, 500] },
@@ -270,6 +328,24 @@ interface OrderContext {
   pointsTxns: PointsTransaction[];
 }
 
+/** IDs de orden ya generados en este seed — evita colisiones silenciosas. */
+const generatedOrderIds = new Set<string>();
+
+/** Resetea el Set de IDs — llamar al inicio de cada runSeed(). */
+export function resetOrderIds(): void {
+  generatedOrderIds.clear();
+}
+
+/** Genera un ID de orden numérico de 9 dígitos, garantizando unicidad dentro del seed. */
+function uniqueOrderId(): string {
+  let candidate = f.string.numeric({ length: 9 });
+  while (generatedOrderIds.has(candidate)) {
+    candidate = f.string.numeric({ length: 9 });
+  }
+  generatedOrderIds.add(candidate);
+  return candidate;
+}
+
 export function generateOrder(
   user: User,
   merchant: Merchant,
@@ -338,7 +414,7 @@ export function generateOrder(
   }
 
   const order: Order = {
-    id: id("ord"),
+    id: uniqueOrderId(),
     userId: user.id,
     merchantId: merchant.id,
     merchantName: merchant.name,
@@ -600,16 +676,16 @@ export function recalcMembership(membership: Membership, pointsTxns: PointsTrans
  * Estos son los pagos que el agente puede validar con `POST /payments/validate`.
  */
 export function makePendingPayment(userId: string, installment: Installment): Payment {
-  // Prefijo `REF_OK` — POST /payments/validate decide el desenlace por prefijo
+  // Prefijo `10` — POST /payments/validate decide el desenlace por prefijo
   // (ver OUTCOME_BY_PREFIX en routes/payments.ts).
-  const ref = `REF_OK${f.string.alphanumeric({ length: 8, casing: "upper" })}`;
+  const ref = `10${f.string.numeric({ length: 10 })}`;
   return {
     id: id("pmt"),
     userId,
     externalReference: ref,
     amount: installment.amountDue,
-    currency: "MXN",
-    method: f.helpers.arrayElement(["spei", "card", "bank_transfer"]),
+    currency: "VES",
+    method: f.helpers.arrayElement(["bank_transfer", "bank_transfer", "card"]),
 
     status: "pending_validation",
     appliedTo: {

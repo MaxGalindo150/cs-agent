@@ -12,7 +12,7 @@ import {
   makeMerchants, makeUser, makeAddress, makePaymentMethod,
   makeCreditAccount, makeMembership, randomPointsForTier,
   generateOrder, recalcCreditAccount, recalcMembership,
-  makePendingPayment,
+  makePendingPayment, resetOrderIds,
 } from "./generators.js";
 import type { Installment } from "../schema/index.js";
 import { shipmentStuck } from "./scenarios/shipment-scenarios.js";
@@ -22,9 +22,9 @@ import { doublePayment, failedPayment } from "./scenarios/payment-scenarios.js";
  * Everything else about them (dob, orders, credit, points…) still comes from
  * the seeded faker instance, so it's rich but deterministic across restarts. */
 export const DEMO_USERS = [
-  { firstName: "Alice", lastName: "Johnson", email: "alice@example.com", phone: "+525512340001" },
-  { firstName: "Bob", lastName: "Martinez", email: "bob@example.com", phone: "+525512340002" },
-  { firstName: "Carol", lastName: "Diaz", email: "carol@example.com", phone: "+525512340003" },
+  { firstName: "Ana", lastName: "Rodríguez", email: "ana.rodriguez@example.com", phone: "+584125551001" },
+  { firstName: "Carlos", lastName: "Mendoza", email: "carlos.mendoza@example.com", phone: "+584145551002" },
+  { firstName: "Luisana", lastName: "Pérez", email: "luisana.perez@example.com", phone: "+584245551003" },
 ] as const;
 
 export const SEED_USER_COUNT = DEMO_USERS.length;
@@ -38,6 +38,7 @@ const DEMO_SCENARIOS = [shipmentStuck, doublePayment, failedPayment];
 export function runSeed(): Database {
   initFaker();
   resetIdCounter();
+  resetOrderIds();
   const db = createEmptyDB();
 
   // ── Merchants ──────────────────────────────────────────────
