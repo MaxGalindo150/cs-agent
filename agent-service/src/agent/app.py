@@ -29,8 +29,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import structlog
 from anthropic import AsyncAnthropic
-from anthropic.types import MessageParam
+from anthropic.types import (
+    MessageParam,
+    RedactedThinkingBlockParam,
+    TextBlockParam,
+    ThinkingBlockParam,
+    ToolUseBlockParam,
+)
+from pydantic import BaseModel, ValidationError
 
 from agent.identity import Principal
 from agent.loop.agent import LoopResult, run_loop
@@ -43,6 +51,22 @@ from agent.runtime.session import Session
 from agent.tools.context import ToolContext
 from agent.tools.registry import ToolRegistry
 from agent.vision import Image
+
+log = structlog.get_logger()
+
+# Keyed by the block's own "type" discriminant, not by its response-side
+# Python class — a streamed response can hand back a subclass (e.g.
+# ``ParsedTextBlock`` for ``type: "text"``) carrying response-only fields
+# (``parsed_output``) that the *input*-side Param TypedDict below has never
+# heard of. Whitelisting by what the Param type declares (rather than by
+# whatever the response object happens to declare) is what actually matches
+# the schema the API validates against when this block is replayed as input.
+_CONTENT_BLOCK_INPUT_KEYS: dict[str, frozenset[str]] = {
+    "text": frozenset(TextBlockParam.__annotations__),
+    "tool_use": frozenset(ToolUseBlockParam.__annotations__),
+    "thinking": frozenset(ThinkingBlockParam.__annotations__),
+    "redacted_thinking": frozenset(RedactedThinkingBlockParam.__annotations__),
+}
 
 
 def _user_content(text: str, images: list[Image] | None) -> str | list[dict[str, Any]]:
@@ -80,6 +104,78 @@ def _with_image_marker(text: str, images: list[Image] | None) -> str:
     return f"{text}\n[{len(images)} {noun} attached]"
 
 
+def _serialize_tail(tail: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`run_loop` appends the assistant's turn as ``response.content`` verbatim
+    (real Anthropic SDK objects — ``TextBlock``/``ToolUseBlock`` pydantic
+    models, not dicts) — a captured tail can carry those straight through.
+    Convert them to plain JSON-able dicts before this goes into a JSONB
+    column; entries built by this module (the original user message, a
+    tool_result) are already plain dicts and pass through unchanged.
+
+    A streamed response can hand back a block whose Python class carries
+    fields the corresponding *input* Param TypedDict has never heard of — e.g.
+    a text block streamed back while tools are in play arrives as
+    ``ParsedTextBlock`` (a ``TextBlock`` subclass) with its own declared
+    ``parsed_output`` field. A plain ``model_dump()`` includes it, and the
+    API's input-side schema (``TextBlockParam``) rejects it outright with a
+    400 when this tail is replayed on resume — filtering by *that* block's own
+    fields doesn't help, since the field is legitimately declared there, just
+    not on the Param type. Whitelist by the block's ``type`` discriminant
+    against ``_CONTENT_BLOCK_INPUT_KEYS`` (the Param side) instead.
+    """
+    serialized: list[dict[str, Any]] = []
+    for msg in tail:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            serialized.append(msg)
+            continue
+        blocks: list[Any] = []
+        for block in content:
+            if not isinstance(block, BaseModel):
+                blocks.append(block)
+                continue
+            dumped = block.model_dump(mode="json")
+            allowed = _CONTENT_BLOCK_INPUT_KEYS.get(dumped.get("type", ""))
+            if allowed is not None:
+                dumped = {k: v for k, v in dumped.items() if k in allowed}
+            blocks.append(dumped)
+        serialized.append({**msg, "content": blocks})
+    return serialized
+
+
+def _sanitize_tail(tail: list[dict[str, Any]], plain_text: str) -> list[dict[str, Any]]:
+    """A captured suspended-turn tail (``LoopResult.suspended["turn_tail"]``)
+    starts with this leg's own triggering message — a plain new turn's user
+    message, or (on a re-suspended resume) a tool_result closing the previous
+    one. Only the former can ever carry raw image blocks (`_user_content`);
+    swap it for the same marker text already used for `chat_messages.content`
+    (`_with_image_marker`) so an image never outlives the single request it
+    arrived in, suspended turn or not. Left unchanged when the first entry
+    has no image block — including every tool_result-first tail, which never
+    does."""
+    if not tail:
+        return []
+    first = tail[0]
+    content = first.get("content")
+    has_image = isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "image" for b in content
+    )
+    if not has_image:
+        return tail
+    return [{"role": first["role"], "content": plain_text}, *tail[1:]]
+
+
+def _tool_status(out: str) -> str:
+    """A tool's output, classified for `meta.tools` — a coarse "did it work"
+    signal a reopened thread's UI can show without parsing the full text."""
+    low = (out or "").lower()
+    return (
+        "error"
+        if ("failed" in low or "timed out" in low or low.startswith("error"))
+        else "ok"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AgentConfig:
     """Tuning knobs the brain needs, injected by the transport.
@@ -111,6 +207,25 @@ class AgentConfig:
     """Stamped into each turn's ``meta`` so a reopened thread records which
     provider answered. A single provider today; kept explicit for parity with
     Waku's multi-provider traces."""
+
+
+class SuspendedToolUse(BaseModel):
+    """Validated shape of ``chat_sessions.suspended_tool_use``.
+
+    Untrusted at this boundary — a free-form JSONB value that could have been
+    written by a previously deployed version of this code with a different
+    shape. Parsed once, here, rather than subscripting ``pending[...]`` field
+    by field: a malformed row must degrade to a fresh turn, not raise a
+    ``KeyError`` that leaves the suspension neither claimed nor resumed —
+    which would make ``peek_suspended_tool_use`` return that same unreadable
+    payload on every later turn, wedging the conversation permanently."""
+
+    tool_use_id: str
+    tool_name: str
+    turn_tail: list[dict[str, Any]]
+    system: str
+    payload: dict[str, Any]
+    iteration: int
 
 
 class Agent:
@@ -152,7 +267,8 @@ class Agent:
     async def respond(
         self,
         session_id: uuid.UUID,
-        user_message: str,
+        user_message: str | None = None,
+        choice_id: str | None = None,
         observer: Observer | None = None,
         source: str = "api",
         stream: bool = False,
@@ -160,6 +276,15 @@ class Agent:
         images: list[Image] | None = None,
     ) -> LoopResult:
         """One full turn: assemble working memory → run the loop → persist.
+
+        ``choice_id`` resolves a pending `present_choice` suspension
+        (``agent/tools/implementations/present_choice.py``) by option id —
+        exactly one of ``user_message``/``choice_id`` is expected (the
+        transport validates this; see ``service/api/v1/chat.py::ChatRequest``).
+        When a suspension is pending, this branches to
+        ``_resume_suspended_turn`` before ever touching ``build_system()`` or
+        ``run_loop`` the normal way — see that method for why a button click
+        and free text take different paths.
 
         ``session_id`` says which conversation this turn belongs to. Waku reads
         it off ``self.session`` (held on the long-lived object); here the ``Agent``
@@ -201,7 +326,7 @@ class Agent:
         notify = compose(observer, self._tracer.event, _capture)
         t0 = time.perf_counter()
         ctx = ToolContext(principal=principal, session_id=session_id)
-        persisted_message = _with_image_marker(user_message, images)
+        persisted_message = _with_image_marker(user_message or "", images)
 
         with self._tracer.turn(persisted_message, session_id=str(session_id)):
             # No held session (unlike Waku): build one per request and load this
@@ -217,7 +342,7 @@ class Agent:
             # repeat a promise it can't back. The message is still recorded
             # (the human agent needs the full transcript), just never sent
             # to run_loop.
-            fixed = await session.fixed_response(user_message)
+            fixed = await session.fixed_response(user_message or "")
             if fixed is not None:
                 notify("text", {"delta": fixed})
                 await session.add_exchange(
@@ -230,7 +355,46 @@ class Agent:
                     },
                 )
                 self._tracer.end_turn(fixed, 0)
-                return LoopResult(reply=fixed, tool_calls=[], iterations=0)
+                return LoopResult(
+                    reply=fixed, tool_calls=[], iterations=0, needs_human=True
+                )
+
+            # A suspended `present_choice` (agent/tools/registry.py's
+            # Tool.suspends) takes over the whole turn — never build_system()
+            # or run_loop() the normal way until it's resolved one way or
+            # another. See _resume_suspended_turn for the button-vs-free-text
+            # branch and why only one of them rebuilds the system prompt.
+            pending = await self._memory.peek_suspended_tool_use(session_id)
+            if pending is not None:
+                resumed = await self._resume_suspended_turn(
+                    session,
+                    session_id,
+                    pending,
+                    user_message,
+                    choice_id,
+                    notify,
+                    source,
+                    stream,
+                    ctx,
+                )
+                if resumed is not None:
+                    return resumed
+                # else: lost a race to a concurrent duplicate request — the
+                # suspension is gone. Fall through only if there's real text
+                # to run a fresh turn on (checked next); a bare stale
+                # `choice_id` with nothing else has nothing left to do.
+
+            if not user_message:
+                # `choice_id` was given but nothing (or nothing anymore) is
+                # pending for it to resolve — never run a turn with no real
+                # message content (build_system/run_loop both expect one).
+                reply = (
+                    "This has already been answered, or there's nothing "
+                    "pending to answer — what do you need?"
+                )
+                notify("text", {"delta": reply})
+                self._tracer.end_turn(reply, 0)
+                return LoopResult(reply=reply)
 
             user_id = principal.user_id if principal else None
             system = await session.build_system(user_message, user_id, notify=notify)
@@ -240,6 +404,7 @@ class Agent:
             # runtime shapes match, only the static type differs. Only THIS
             # entry may carry image blocks — session.history's prior turns are
             # always plain text (see _user_content/_with_image_marker above).
+            history_len = len(session.history)  # where this turn's own content starts
             messages = cast(
                 "list[MessageParam]",
                 session.history
@@ -259,22 +424,12 @@ class Agent:
                 ctx=ctx,
             )
 
-            def _status(out: str) -> str:
-                low = (out or "").lower()
-                return (
-                    "error"
-                    if (
-                        "failed" in low or "timed out" in low or low.startswith("error")
-                    )
-                    else "ok"
-                )
-
-            meta = {
+            meta: dict[str, Any] = {
                 "gate": captured.get("gate"),
                 "iterations": result.iterations,
                 "latency_ms": int((time.perf_counter() - t0) * 1000),
                 "tools": [
-                    {"tool": c["tool"], "status": _status(c["output"])}
+                    {"tool": c["tool"], "status": _tool_status(c["output"])}
                     for c in result.tool_calls
                 ],
                 # The ordered text/tool-call trail, so a reopened thread can
@@ -287,6 +442,32 @@ class Agent:
                 "model": self._config.model,
                 "provider": self._config.provider,
             }
+
+            if result.suspended is not None:
+                # Everything appended since this turn started (not just the
+                # final assistant message) — an earlier tool call in the same
+                # turn must survive on resume too (see the plan's note on why
+                # a single-message snapshot isn't enough). Sanitized: the first
+                # entry is this turn's own trigger message, which may carry
+                # raw image blocks that must not outlive this one request.
+                result.suspended["turn_tail"] = _sanitize_tail(
+                    _serialize_tail(
+                        cast("list[dict[str, Any]]", messages[history_len:])
+                    ),
+                    persisted_message,
+                )
+                meta["tool_use_id"] = result.suspended["tool_use_id"]
+                await session.add_exchange(
+                    persisted_message,
+                    result.reply,
+                    tool_calls=result.tool_calls,
+                    source=source,
+                    meta=meta,
+                )
+                await self._memory.set_suspended_tool_use(session_id, result.suspended)
+                self._tracer.end_turn(result.reply, result.iterations)
+                return result
+
             await session.add_exchange(
                 persisted_message,
                 result.reply,
@@ -306,6 +487,217 @@ class Agent:
             # missing its session_id. The OTel flush moved into turn()'s cleanup.
             self._tracer.end_turn(result.reply, result.iterations)
 
+        return result
+
+    async def _resume_suspended_turn(
+        self,
+        session: Session,
+        session_id: uuid.UUID,
+        pending: dict[str, Any],
+        user_message: str | None,
+        choice_id: str | None,
+        notify: Observer,
+        source: str,
+        stream: bool,
+        ctx: ToolContext,
+    ) -> LoopResult | None:
+        """Resolve a pending `present_choice` (or decide there's nothing here
+        that resolves it yet). Two resolution paths:
+
+        - **Button click** (`choice_id` matches one of the pending options):
+          replay the ENTIRE `system` string built for the turn that asked the
+          question — soul + retrieved memory + matched skill instructions,
+          not just the soul — verbatim. `build_system()` is never called on
+          this path: the retrieval gate and skill matcher already decided
+          everything relevant to this exact question a moment ago; rebuilding
+          either on a bare option id would be wrong, not just wasteful.
+        - **Free text** (customer types instead of clicking): the full normal
+          pipeline runs — `build_system()` fresh against what they typed,
+          same as any ordinary new turn — because it's genuinely new input
+          the gate/skill matcher should see. The dangling tool_use still has
+          to be closed first (Anthropic requires a tool_result immediately
+          after it): the customer's text becomes that tool_result's content.
+
+        Returns `None` only when a concurrent request already claimed this
+        suspension (double-submit/retry) — `respond()` decides what happens
+        next in that case. Every other outcome here is final (persistence and
+        tracing already done).
+        """
+        try:
+            state = SuspendedToolUse.model_validate(pending)
+        except ValidationError as exc:
+            # This version can't read the persisted shape — never let that
+            # wedge the conversation forever (see SuspendedToolUse's
+            # docstring). Best-effort clear: if `tool_use_id` itself didn't
+            # survive validation there's nothing left to key the claim on,
+            # and the next peek will just hit this same path again.
+            log.error(
+                "suspension.unreadable", session_id=str(session_id), error=str(exc)
+            )
+            stale_id = pending.get("tool_use_id")
+            if isinstance(stale_id, str):
+                await self._memory.claim_suspended_tool_use(session_id, stale_id)
+            return None
+
+        options = state.payload.get("options", [])
+        matched = (
+            next((o for o in options if o.get("id") == choice_id), None)
+            if choice_id
+            else None
+        )
+
+        if matched is None and not user_message:
+            # A stale/invalid choice_id with nothing else — reject it without
+            # touching the still-live suspension, so a real retry can still
+            # resolve it (docs/SECURITY.md-style: never trust a client id).
+            reply = "Please choose one of the options above, or tell me what you need."
+            notify("text", {"delta": reply})
+            self._tracer.end_turn(reply, 0)
+            return LoopResult(reply=reply)
+
+        # Only claim (clear) the suspension once we're sure this request
+        # actually resolves it — never as a side effect of merely checking.
+        claimed = await self._memory.claim_suspended_tool_use(
+            session_id, state.tool_use_id
+        )
+        if not claimed:
+            return None  # lost a race — caller decides what happens next
+
+        tool_use_id = state.tool_use_id
+        logged_user_text = (
+            f"[selected option: {matched['label']}]"
+            if matched is not None
+            else (user_message or "")
+        )
+
+        # A hard budget, same as run_loop's own guardrail: if the question
+        # that suspended was already asked in this turn's last allowed
+        # iteration (or max_iterations shrank since), resuming would call the
+        # LLM with a non-positive budget and just return the generic
+        # "iteration limit" reply — silently truncating instead of escalating
+        # (CLAUDE.md §2.3). Escalate deterministically instead.
+        remaining_iterations = self._config.max_iterations - state.iteration
+        if remaining_iterations <= 0:
+            await self._memory.mark_escalated(
+                session_id, "Ran out of turns while resuming a paused question."
+            )
+            reply = (
+                "Necesito que un agente humano continúe con esto — ya quedó "
+                "marcado, en breve alguien te da seguimiento."
+            )
+            notify("text", {"delta": reply})
+            await session.add_exchange(
+                logged_user_text,
+                reply,
+                source=source,
+                meta={"segments": [{"type": "text", "text": reply}]},
+            )
+            await self._memory.mark_choice_resolved(
+                session_id, tool_use_id, matched["id"] if matched is not None else None
+            )
+            self._tracer.end_turn(reply, 0)
+            return LoopResult(reply=reply, needs_human=True)
+
+        t0 = time.perf_counter()
+        if matched is not None:
+            system = state.system
+            resolution_text = f"The customer selected: {matched['label']}"
+        else:
+            assert user_message is not None  # guaranteed by the guard above
+            user_id = ctx.principal.user_id if ctx.principal else None
+            system = await session.build_system(user_message, user_id, notify=notify)
+            resolution_text = user_message
+
+        baseline = cast("list[MessageParam]", session.history[:-2] + state.turn_tail)
+        history_len = len(baseline)
+        messages = list(baseline) + [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": resolution_text,
+                    }
+                ],
+            }
+        ]
+
+        result = await run_loop(
+            client=self._client,
+            model=self._config.model,
+            system=system,
+            messages=messages,
+            tools=self._tools,
+            max_iterations=remaining_iterations,
+            max_tokens=self._config.max_tokens,
+            observer=notify,
+            stream=stream,
+            ctx=ctx,
+        )
+
+        meta: dict[str, Any] = {
+            "iterations": result.iterations,
+            "latency_ms": int((time.perf_counter() - t0) * 1000),
+            "tools": [
+                {"tool": c["tool"], "status": _tool_status(c["output"])}
+                for c in result.tool_calls
+            ],
+            "segments": result.segments,
+            "model": self._config.model,
+            "provider": self._config.provider,
+        }
+
+        if result.suspended is not None:
+            # Asked another clarifying question right after this one resolved.
+            # The new leg's tail must start the same way a FRESH suspension's
+            # does — a plain user-facing message, never the tool_result we
+            # just synthesized above: that tool_result's matching tool_use
+            # only exists in this one resume call's in-memory `messages`,
+            # never in the persisted (summarized-to-text) session.history:
+            # replaying it verbatim on the *next* resume would leave an
+            # orphaned tool_result with no preceding tool_use, and the API
+            # would reject the whole request with a 400.
+            resumed_leg_tail = [
+                {"role": "user", "content": logged_user_text},
+                *messages[history_len + 1 :],
+            ]
+            result.suspended["turn_tail"] = _sanitize_tail(
+                _serialize_tail(cast("list[dict[str, Any]]", resumed_leg_tail)),
+                logged_user_text,
+            )
+            meta["tool_use_id"] = result.suspended["tool_use_id"]
+            await session.add_exchange(
+                logged_user_text,
+                result.reply,
+                tool_calls=result.tool_calls,
+                source=source,
+                meta=meta,
+            )
+            await self._memory.set_suspended_tool_use(session_id, result.suspended)
+            # This leg's own question is answered too — just by one that
+            # immediately led to another, rather than a final reply. Settle
+            # it the same way, so a reload shows THIS leg's buttons resolved
+            # instead of still live.
+            await self._memory.mark_choice_resolved(
+                session_id, tool_use_id, matched["id"] if matched is not None else None
+            )
+            self._tracer.end_turn(result.reply, result.iterations)
+            return result
+
+        await session.add_exchange(
+            logged_user_text,
+            result.reply,
+            tool_calls=result.tool_calls,
+            source=source,
+            meta=meta,
+        )
+        # Both paths settle the question: a click names the option, typed
+        # text only records that the buttons are no longer live.
+        await self._memory.mark_choice_resolved(
+            session_id, tool_use_id, matched["id"] if matched is not None else None
+        )
+        self._tracer.end_turn(result.reply, result.iterations)
         return result
 
 

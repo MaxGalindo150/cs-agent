@@ -71,6 +71,91 @@ class SessionRepository:
         )
         return cast(CursorResult[Any], result).rowcount > 0
 
+    async def set_suspended_tool_use(
+        self, session_id: uuid.UUID, payload: dict[str, Any]
+    ) -> None:
+        """First write for a new suspension (agent/tools/registry.py's
+        Tool.suspends). Nothing else can race to set this at the same moment a
+        turn suspends — the write path that calls this is the only one that
+        ever does, right after `run_loop` returns with `LoopResult.suspended`
+        set."""
+        await self._db.execute(
+            update(ChatSession)
+            .where(ChatSession.id == session_id)
+            .values(suspended_tool_use=payload)
+        )
+
+    async def peek_suspended_tool_use(
+        self, session_id: uuid.UUID
+    ) -> dict[str, Any] | None:
+        """Read-only: whether a suspension is pending, without consuming it.
+        Callers must decide an incoming request actually resolves it (a
+        matching `choice_id`, or any free text) BEFORE calling
+        `claim_suspended_tool_use` — a mere read must never clear it, or a
+        stale/garbage `choice_id` with no accompanying text would silently
+        destroy a still-live suspension."""
+        return await self._db.scalar(
+            select(ChatSession.suspended_tool_use).where(ChatSession.id == session_id)
+        )
+
+    async def claim_suspended_tool_use(
+        self, session_id: uuid.UUID, tool_use_id: str
+    ) -> bool:
+        """Atomically clear the pending suspension iff it's still this exact
+        one — same idempotency shape as `mark_escalated` (the guard lives in
+        the `WHERE`, not a separate read-then-write), keyed on `tool_use_id`
+        instead of an `IS NULL` check. Returns ``False`` if it was already
+        claimed by a concurrent request (double submit, a retried request) or
+        superseded by a newer suspension — the caller must not resume or
+        persist anything in that case, only treat it as already handled."""
+        result = await self._db.execute(
+            update(ChatSession)
+            .where(
+                ChatSession.id == session_id,
+                ChatSession.suspended_tool_use["tool_use_id"].astext == tool_use_id,
+            )
+            .values(suspended_tool_use=None)
+        )
+        return cast(CursorResult[Any], result).rowcount > 0
+
+    async def mark_choice_resolved(
+        self, session_id: uuid.UUID, tool_use_id: str, resolved_option_id: str | None
+    ) -> bool:
+        """Patch the suspended half-turn's persisted `choice` segment so any
+        reload (this tab or another) renders it resolved — settled buttons,
+        not live/re-clickable ones. This is what shrinks how often a stale
+        click can even happen in the first place.
+
+        ``resolved_option_id`` is ``None`` when the customer typed free text
+        instead of clicking: the question is still settled (no more live
+        buttons), just without a specific option to highlight — the renderer
+        tells these apart via ``resolved`` (always ``True`` here) vs whether
+        ``resolvedOptionId`` is present at all."""
+        row = await self._db.scalar(
+            select(ChatMessage)
+            .where(
+                ChatMessage.session_id == session_id,
+                ChatMessage.role == "assistant",
+                ChatMessage.meta["tool_use_id"].astext == tool_use_id,
+            )
+            .order_by(ChatMessage.seq.desc())
+            .limit(1)
+        )
+        if row is None or not row.meta or not row.meta.get("segments"):
+            return False
+        segments = list(row.meta["segments"])
+        if not segments or segments[-1].get("type") != "choice":
+            return False
+        segments[-1] = {**segments[-1], "resolved": True}
+        if resolved_option_id is not None:
+            segments[-1]["resolvedOptionId"] = resolved_option_id
+        # Reassign the whole dict: `meta` is a plain JSONB column (no
+        # MutableDict wrapper), so an in-place mutation wouldn't be tracked
+        # and would silently fail to flush.
+        row.meta = {**row.meta, "segments": segments}
+        await self._db.flush()
+        return True
+
     async def list_sessions(self, limit: int = 50) -> list[ChatSession]:
         """Most recently active first — the order a chat sidebar wants."""
         result = await self._db.execute(

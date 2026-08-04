@@ -17,7 +17,26 @@ export type Role = "user" | "assistant";
 export type MessagePart =
   | { type: "text"; text: string }
   | { type: "steps"; steps: ActivityStep[] }
-  | { type: "image"; previewUrl: string };
+  | { type: "image"; previewUrl: string }
+  | {
+      type: "choice";
+      prompt: string;
+      options: ChoiceOption[];
+      /** Set once a specific option was clicked — settles on that option. */
+      resolvedOptionId?: string;
+      /** Set once the question is settled at all, by button OR free text —
+       *  independent of `resolvedOptionId`, which free text never sets.
+       *  Distinguishes "answered, no option to highlight" from "still
+       *  pending" without treating an empty string as a fake option id. */
+      resolved?: boolean;
+    };
+
+/** One clickable option in a `present_choice` prompt (agent-service's
+ *  `agent/tools/implementations/present_choice.py`). */
+export interface ChoiceOption {
+  id: string;
+  label: string;
+}
 
 export interface Message {
   id: string;
@@ -30,6 +49,10 @@ export interface Message {
   streaming?: boolean;
   /** Set when this message failed to complete. */
   error?: string;
+  /** Set when this reply is a harness-level escalation (session already
+   *  flagged, or a resumed turn ran out of iteration budget) rather than an
+   *  ordinary answer — from the SSE `done` event's `needs_human` field. */
+  needsHuman?: boolean;
 }
 
 /**

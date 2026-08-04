@@ -76,6 +76,20 @@ class ChatSession(Base):
     escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     escalation_reason: Mapped[str | None] = mapped_column(Text)
 
+    # Everything needed to resume one paused tool call (agent/tools/registry.py's
+    # Tool.suspends, agent/tools/implementations/present_choice.py). Null = nothing
+    # pending. Shape: {tool_use_id, tool_name, turn_tail, system, payload, iteration}.
+    # turn_tail is the full list of raw message dicts appended since the turn
+    # started (not just the last one) — a single-message snapshot would lose an
+    # earlier tool call made in the same turn before the suspending one. Its first
+    # entry is sanitized the same way chat_messages.content is (agent/app.py's
+    # _with_image_marker) — an image attachment never outlives the single request
+    # it arrived in, suspended turn or not. Cleared atomically and only on a
+    # genuine resolution by SessionRepository.claim_suspended_tool_use — never
+    # read-then-written separately, and never cleared by a request that merely
+    # looked at it (SessionRepository.peek_suspended_tool_use).
+    suspended_tool_use: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
     messages: Mapped[list[ChatMessage]] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",

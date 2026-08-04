@@ -9,6 +9,10 @@ interface MessageListProps {
   messages: Message[];
   /** Send a suggested prompt from the empty state. */
   onSuggestion?: (text: string) => void;
+  /** Resolve a pending `present_choice` by option id. */
+  onChoice?: (optionId: string) => void;
+  /** True while any turn is in flight — disables live choice buttons. */
+  disableChoices?: boolean;
 }
 
 const SUGGESTIONS = [
@@ -19,7 +23,12 @@ const SUGGESTIONS = [
 ];
 
 /** Scrollable list of messages. Auto-scrolls to the bottom as content grows. */
-export function MessageList({ messages, onSuggestion }: MessageListProps) {
+export function MessageList({
+  messages,
+  onSuggestion,
+  onChoice,
+  disableChoices,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Re-run whenever the last message's parts grow (a new delta, a new tool
@@ -33,7 +42,9 @@ export function MessageList({ messages, onSuggestion }: MessageListProps) {
       ? lastPart.text.length
       : lastPart?.type === "steps"
         ? lastPart.steps.length
-        : 0;
+        : lastPart?.type === "choice"
+          ? lastPart.options.length
+          : 0;
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, lastPartCount, lastPartSize]);
@@ -45,7 +56,12 @@ export function MessageList({ messages, onSuggestion }: MessageListProps) {
   return (
     <div className="flex flex-col gap-8">
       {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+        <MessageBubble
+          key={message.id}
+          message={message}
+          onChoice={onChoice}
+          disableChoices={disableChoices}
+        />
       ))}
       <div ref={bottomRef} />
     </div>

@@ -15,7 +15,7 @@ from typing import Literal
 
 import structlog
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from agent.app import Agent
 from agent.identity import Principal
@@ -97,7 +97,17 @@ class ImageInput(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=8000)
+    message: str | None = Field(default=None, min_length=1, max_length=8000)
+    choice_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description=(
+            "Resolves a pending present_choice by option id — the customer "
+            "clicked a button instead of typing. Exactly one of `message`/"
+            "`choice_id` must be set."
+        ),
+    )
     session_id: uuid.UUID | None = Field(
         default=None,
         description=(
@@ -111,11 +121,52 @@ class ChatRequest(BaseModel):
         description="Images attached as context for this turn (see ImageInput).",
     )
 
+    @model_validator(mode="after")
+    def _exactly_one_driver(self) -> ChatRequest:
+        # Structured input over free-text parsing (CLAUDE.md §6): a button
+        # click is a `choice_id`, never text the model has to reinterpret —
+        # so the two are mutually exclusive at the wire boundary, not just by
+        # convention.
+        if bool(self.message) == bool(self.choice_id):
+            raise ValueError("Provide exactly one of `message` or `choice_id`.")
+        if self.choice_id and not self.session_id:
+            raise ValueError("`choice_id` requires an existing `session_id`.")
+        return self
+
+
+class ChoiceOption(BaseModel):
+    """One clickable option in a `present_choice` prompt."""
+
+    id: str
+    label: str
+
+
+class ChoiceOut(BaseModel):
+    """What the customer is being asked to pick between — validated (and
+    documented in the OpenAPI schema) instead of an untyped dict, so the
+    frontend's `ChoiceOption`/`MessagePart` types can't silently drift from
+    what this endpoint actually sends."""
+
+    prompt: str
+    options: list[ChoiceOption]
+
 
 class ChatResponse(BaseModel):
     reply: str
     iterations: int
     session_id: uuid.UUID
+    choice: ChoiceOut | None = Field(
+        default=None,
+        description="Set when this turn suspended on present_choice.",
+    )
+    needs_human: bool = Field(
+        default=False,
+        description=(
+            "True when `reply` is a harness-level escalation (session already "
+            "flagged for a human, or a resumed turn ran out of iteration "
+            "budget) rather than an ordinary answer."
+        ),
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -130,16 +181,32 @@ async def chat(
     )
 
     # New conversation → mint a session up front (chat_messages FKs to it),
-    # titled with the message that opened it.
-    session_id = req.session_id or await agent.start_session(
-        session_title(req.message), principal=principal
-    )
+    # titled with the message that opened it. `choice_id` requires an existing
+    # `session_id` (the validator enforces it), so `req.message` is guaranteed
+    # set whenever this branch runs.
+    if req.session_id is None:
+        assert req.message is not None
+        session_id = await agent.start_session(
+            session_title(req.message), principal=principal
+        )
+    else:
+        session_id = req.session_id
     images = [img.to_agent_image() for img in req.images] or None
     result = await agent.respond(
-        session_id, req.message, source="api", principal=principal, images=images
+        session_id,
+        req.message,
+        choice_id=req.choice_id,
+        source="api",
+        principal=principal,
+        images=images,
+    )
+    choice_segment = next(
+        (seg for seg in reversed(result.segments) if seg.get("type") == "choice"), None
     )
     return ChatResponse(
         reply=result.reply,
         iterations=result.iterations,
         session_id=session_id,
+        choice=ChoiceOut.model_validate(choice_segment) if choice_segment else None,
+        needs_human=result.needs_human,
     )

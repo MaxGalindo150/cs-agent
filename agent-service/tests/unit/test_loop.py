@@ -53,6 +53,7 @@ def _register(
     name: str,
     fn: Callable[..., Awaitable[str]],
     requires_identity: bool = False,
+    suspends: bool = False,
 ) -> None:
     reg.register(
         Tool(
@@ -61,6 +62,7 @@ def _register(
             input_schema=_SCHEMA,
             fn=fn,
             requires_identity=requires_identity,
+            suspends=suspends,
         )
     )
 
@@ -334,6 +336,178 @@ async def test_a_tool_only_response_produces_no_empty_lead_in_segment() -> None:
 
     assert result.reply == "5"
     assert [seg["type"] for seg in result.segments] == ["tools", "text"]
+
+
+async def test_suspending_tool_stops_the_loop_without_a_further_llm_call() -> None:
+    """`present_choice`'s whole point: once called, the loop must not call the
+    LLM again this turn — the model would otherwise have to guess the
+    customer's answer instead of actually waiting for it. FakeClient only has
+    one scripted response, so a second `create()` call would raise IndexError
+    from `.pop(0)` on an empty list — the strongest possible proof here."""
+
+    async def present_choice(prompt: str, options: list[dict[str, str]]) -> str:
+        return "paused"
+
+    reg = ToolRegistry()
+    _register(reg, "present_choice", present_choice, suspends=True)
+
+    client = FakeClient(
+        [
+            _msg(
+                _tool_use(
+                    "present_choice",
+                    {
+                        "prompt": "Refund to card or store credit?",
+                        "options": [
+                            {"id": "card", "label": "Card"},
+                            {"id": "credit", "label": "Store credit"},
+                        ],
+                    },
+                    "toolu_1",
+                ),
+                stop_reason="tool_use",
+            )
+        ]
+    )
+
+    result = await _run(
+        client, "m", "my-system", [{"role": "user", "content": "hi"}], reg
+    )
+
+    assert result.reply == "Refund to card or store credit?"
+    assert result.suspended == {
+        "tool_use_id": "toolu_1",
+        "tool_name": "present_choice",
+        "system": "my-system",
+        "payload": {
+            "prompt": "Refund to card or store credit?",
+            "options": [
+                {"id": "card", "label": "Card"},
+                {"id": "credit", "label": "Store credit"},
+            ],
+        },
+        "iteration": 1,
+    }
+    assert result.segments == [
+        {
+            "type": "choice",
+            "prompt": "Refund to card or store credit?",
+            "options": [
+                {"id": "card", "label": "Card"},
+                {"id": "credit", "label": "Store credit"},
+            ],
+        }
+    ]
+
+
+async def test_suspending_tool_emits_a_terminal_tool_event() -> None:
+    """`frontend/src/hooks/use-chat.ts` closes a running step only from a
+    `tool` event, matched by tool name to the `tool_start` that opened it — a
+    suspending call must get one too, or its step stays "running" forever in
+    the live transcript."""
+
+    async def present_choice(prompt: str, options: list[dict[str, str]]) -> str:
+        return "paused"
+
+    reg = ToolRegistry()
+    _register(reg, "present_choice", present_choice, suspends=True)
+
+    client = FakeClient(
+        [
+            _msg(
+                _tool_use("present_choice", {"prompt": "p?", "options": []}, "toolu_1"),
+                stop_reason="tool_use",
+            )
+        ]
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    await _run(
+        client,
+        "m",
+        "my-system",
+        [{"role": "user", "content": "hi"}],
+        reg,
+        observer=lambda kind, ev: events.append((kind, ev)),
+    )
+
+    kinds = [kind for kind, _ in events]
+    assert "tool_start" in kinds
+    assert "tool" in kinds
+    tool_event = next(ev for kind, ev in events if kind == "tool")
+    assert tool_event["tool"] == "present_choice"
+
+
+async def test_suspending_tool_keeps_lead_in_text_as_its_own_segment() -> None:
+    async def present_choice(prompt: str, options: list[dict[str, str]]) -> str:
+        return "paused"
+
+    reg = ToolRegistry()
+    _register(reg, "present_choice", present_choice, suspends=True)
+
+    client = FakeClient(
+        [
+            _msg(
+                _text("Veo dos pedidos abiertos."),
+                _tool_use(
+                    "present_choice",
+                    {"prompt": "¿Cuál pedido?", "options": [{"id": "a", "label": "A"}]},
+                    "toolu_1",
+                ),
+                stop_reason="tool_use",
+            )
+        ]
+    )
+
+    result = await _run(client, "m", "sys", [{"role": "user", "content": "hi"}], reg)
+
+    assert result.reply == "Veo dos pedidos abiertos.\n\n¿Cuál pedido?"
+    assert result.segments[0] == {"type": "text", "text": "Veo dos pedidos abiertos."}
+    assert result.segments[1]["type"] == "choice"
+
+
+async def test_a_suspending_tool_mixed_with_another_is_refused_not_executed() -> None:
+    """Anthropic requires every tool_use in a message to get a tool_result
+    before the message list is valid again — a suspending call can't leave
+    its batch-mates stranded. Both calls must be refused, and the turn must
+    continue (not suspend) so the model can retry alone."""
+    ran: list[str] = []
+
+    async def present_choice(prompt: str, options: list[dict[str, str]]) -> str:
+        ran.append("present_choice")
+        return "should not run"
+
+    async def get_order(order_id: str) -> str:
+        ran.append("get_order")
+        return "should not run either"
+
+    reg = ToolRegistry()
+    _register(reg, "present_choice", present_choice, suspends=True)
+    _register(reg, "get_order", get_order)
+
+    client = FakeClient(
+        [
+            _msg(
+                _tool_use("get_order", {"order_id": "7"}, "toolu_1"),
+                _tool_use(
+                    "present_choice",
+                    {"prompt": "p", "options": []},
+                    "toolu_2",
+                ),
+                stop_reason="tool_use",
+            ),
+            _msg(_text("retried alone")),
+        ]
+    )
+
+    result = await _run(client, "m", "sys", [{"role": "user", "content": "hi"}], reg)
+
+    assert ran == []  # neither tool actually executed
+    assert result.suspended is None
+    assert result.reply == "retried alone"
+    calls = result.segments[0]["calls"]
+    assert {c["tool"] for c in calls} == {"get_order", "present_choice"}
+    assert all("retry it alone" in c["output"] for c in calls)
 
 
 async def test_ctx_threads_through_to_an_identity_gated_tool() -> None:

@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchMessages, streamChat } from "@/lib/chat/api";
-import type { ActivityStep, AttachedImage, Message, MessagePart } from "@/lib/chat/types";
+import type {
+  ActivityStep,
+  AttachedImage,
+  ChoiceOption,
+  Message,
+  MessagePart,
+} from "@/lib/chat/types";
 
 // Remembers the active conversation across reloads.
 const STORAGE_KEY = "csa:conversationId";
@@ -31,6 +37,9 @@ export interface UseChat {
   /** Send a user message, optionally with images attached as context, and
    *  stream the assistant reply. */
   send: (text: string, images?: AttachedImage[]) => void;
+  /** Resolve a pending `present_choice` by clicking one of its options,
+   *  instead of typing. */
+  sendChoice: (optionId: string) => void;
   /** Cancel the in-flight stream, keeping whatever text arrived so far. */
   stop: () => void;
   /** Start a fresh conversation: clear the transcript and forget the thread. */
@@ -117,6 +126,53 @@ export function useChat(options: UseChatOptions = {}): UseChat {
     );
   }, []);
 
+  /** Append a `present_choice` prompt to the assistant message being built —
+   *  always its own part (never joined with an adjacent one), since a choice
+   *  widget is never merged with surrounding text or tool steps. */
+  const addChoice = useCallback(
+    (id: string, prompt: string, options: ChoiceOption[]) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === id
+            ? { ...m, parts: [...m.parts, { type: "choice" as const, prompt, options }] }
+            : m,
+        ),
+      );
+    },
+    [],
+  );
+
+  /** Settle the most recent still-open `choice` part — so answering visibly
+   *  resolves it right away, without waiting for a reload to show it settled.
+   *  Called with an `optionId` when the customer clicked a button (highlights
+   *  that option); called with none when they typed free text instead
+   *  (settles the widget with nothing highlighted — mirrors the backend's
+   *  `mark_choice_resolved(..., resolved_option_id=None)`). */
+  const resolveChoice = useCallback((optionId?: string) => {
+    setMessages((prev) => {
+      const target = [...prev]
+        .reverse()
+        .find((m) => m.parts.some((p) => p.type === "choice" && !p.resolved));
+      if (!target) return prev;
+      return prev.map((m) =>
+        m.id !== target.id
+          ? m
+          : {
+              ...m,
+              parts: m.parts.map((p) =>
+                p.type === "choice" && !p.resolved
+                  ? {
+                      ...p,
+                      resolved: true,
+                      ...(optionId ? { resolvedOptionId: optionId } : {}),
+                    }
+                  : p,
+              ),
+            },
+      );
+    });
+  }, []);
+
   /** Append a text delta to the assistant message being built. Joins the
    *  trailing `text` part if the last thing that happened was also text,
    *  else opens a new part — so text that resumes after a tool call becomes
@@ -140,6 +196,11 @@ export function useChat(options: UseChatOptions = {}): UseChat {
     (text: string, images?: AttachedImage[]) => {
       const trimmed = text.trim();
       if (!trimmed || isStreaming) return;
+
+      // Typing instead of clicking still resolves any open choice widget —
+      // the backend clears the suspension either way, so the live UI must
+      // not keep showing those buttons as answerable.
+      resolveChoice();
 
       // Images render above the caption, like most chat apps — read as
       // "here's the picture, and here's what I'm saying about it".
@@ -197,7 +258,9 @@ export function useChat(options: UseChatOptions = {}): UseChat {
             status: "running",
           }),
         onTool: (event) => finishStep(assistantId, event.tool),
+        onChoice: (prompt, options) => addChoice(assistantId, prompt, options),
         onDelta: (delta) => appendDelta(assistantId, delta),
+        onNeedsHuman: () => patch(assistantId, { needsHuman: true }),
       })
         .then(() => patch(assistantId, { streaming: false }))
         .catch((err: unknown) => {
@@ -220,6 +283,87 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       patch,
       addStep,
       finishStep,
+      addChoice,
+      resolveChoice,
+      appendDelta,
+      setConversation,
+      onConversationUpdate,
+      principal,
+    ],
+  );
+
+  /** Resolve a pending `present_choice` by option id — the button-click
+   *  sibling of `send`. No new user bubble: the choice widget itself settles
+   *  in place (`resolveChoice`) to show what was picked. */
+  const sendChoice = useCallback(
+    (optionId: string) => {
+      if (isStreaming) return;
+      resolveChoice(optionId);
+
+      const assistantId = newId();
+      const assistantMessage: Message = {
+        id: assistantId,
+        role: "assistant",
+        parts: [],
+        streaming: true,
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+      setIsStreaming(true);
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      streamChat({
+        choiceId: optionId,
+        conversationId: conversationIdRef.current ?? undefined,
+        principal,
+        signal: controller.signal,
+        onConversationId: (id) => setConversation(id),
+        onGate: (decision) => {
+          if (decision === "retrieve") {
+            addStep(assistantId, {
+              id: newId(),
+              kind: "memory",
+              label: "Searched memory",
+              status: "done",
+            });
+          }
+        },
+        onToolStart: (tool, label) =>
+          addStep(assistantId, {
+            id: newId(),
+            kind: "tool",
+            tool,
+            label,
+            status: "running",
+          }),
+        onTool: (event) => finishStep(assistantId, event.tool),
+        onChoice: (prompt, options) => addChoice(assistantId, prompt, options),
+        onDelta: (delta) => appendDelta(assistantId, delta),
+        onNeedsHuman: () => patch(assistantId, { needsHuman: true }),
+      })
+        .then(() => patch(assistantId, { streaming: false }))
+        .catch((err: unknown) => {
+          if (controller.signal.aborted) {
+            patch(assistantId, { streaming: false });
+            return;
+          }
+          const detail = err instanceof Error ? err.message : "unknown error";
+          patch(assistantId, { streaming: false, error: detail });
+        })
+        .finally(() => {
+          setIsStreaming(false);
+          abortRef.current = null;
+          onConversationUpdate?.();
+        });
+    },
+    [
+      isStreaming,
+      patch,
+      addStep,
+      finishStep,
+      addChoice,
+      resolveChoice,
       appendDelta,
       setConversation,
       onConversationUpdate,
@@ -291,5 +435,5 @@ export function useChat(options: UseChatOptions = {}): UseChat {
     }
   }, [conversationId]);
 
-  return { messages, isStreaming, conversationId, send, stop, reset, load };
+  return { messages, isStreaming, conversationId, send, sendChoice, stop, reset, load };
 }

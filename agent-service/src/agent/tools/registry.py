@@ -69,6 +69,15 @@ class Tool:
     have. Set this instead of ``requires_identity`` when a tool needs context
     but must keep working for a caller with no resolved ``Principal``."""
 
+    suspends: bool = False
+    """If true, calling this tool stops ``run_loop`` immediately after it
+    runs — no further LLM call this turn (see ``run_loop``'s suspend branch
+    and ``LoopResult.suspended``). The harness enforces this by inspecting
+    the flag itself; a tool with this set should also ask the model in its
+    own ``description`` to call it alone, but that's an efficiency nicety —
+    ``run_loop`` refuses a batch that mixes a suspending call with others
+    regardless of what the model was told."""
+
     def to_api(self) -> dict[str, Any]:
         """The shape the Messages API expects in its `tools=` parameter."""
         return {
@@ -134,6 +143,12 @@ class ToolRegistry:
         chance to reject it."""
         tool = self._tools.get(name)
         return tool.label(args) if tool else _derive_label(name)
+
+    def suspends(self, name: str) -> bool:
+        """Whether calling this tool should suspend the turn (``Tool.suspends``).
+        An unknown name never suspends — same default-safe shape as `label`."""
+        tool = self._tools.get(name)
+        return tool.suspends if tool else False
 
     async def execute(
         self, name: str, args: dict[str, Any], ctx: ToolContext | None = None

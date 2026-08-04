@@ -36,10 +36,19 @@ _TINY_PNG_B64 = (
 
 
 class _FakeAgent:
+    # No constructor params: this class is used directly as a FastAPI
+    # dependency-override callable (`dependency_overrides[get_agent] =
+    # _FakeAgent`) in most tests, so FastAPI's own DI would introspect and
+    # try to satisfy any `__init__` parameter as if it were a request field —
+    # tests that need custom `segments` set the attribute after construction
+    # instead (see test_chat_surfaces_a_pending_choice_in_the_response).
     def __init__(self) -> None:
         self.received_principal: Principal | None = None
         self.received_images: list[Image] | None = None
+        self.received_choice_id: str | None = None
         self.start_session_principal: Principal | None = None
+        self.segments: list[dict[str, object]] = []
+        self.needs_human: bool = False
 
     async def start_session(
         self, title: str | None = None, principal: Principal | None = None
@@ -50,7 +59,8 @@ class _FakeAgent:
     async def respond(
         self,
         session_id: uuid.UUID,
-        user_message: str,
+        user_message: str | None = None,
+        choice_id: str | None = None,
         observer: Observer | None = None,
         source: str = "api",
         stream: bool = False,
@@ -59,7 +69,13 @@ class _FakeAgent:
     ) -> LoopResult:
         self.received_principal = principal
         self.received_images = images
-        return LoopResult(reply="hi from fake", iterations=1)
+        self.received_choice_id = choice_id
+        return LoopResult(
+            reply="hi from fake",
+            iterations=1,
+            segments=self.segments,
+            needs_human=self.needs_human,
+        )
 
 
 @pytest.fixture
@@ -226,6 +242,101 @@ async def test_chat_rejects_a_mismatched_media_type(
     assert resp.status_code == 422
 
 
+async def test_chat_rejects_both_message_and_choice_id(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    resp = await chat_client.post(
+        "/v1/chat",
+        json={
+            "message": "hello",
+            "choice_id": "card",
+            "session_id": str(_SESSION_ID),
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_chat_rejects_neither_message_nor_choice_id(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    resp = await chat_client.post("/v1/chat", json={})
+
+    assert resp.status_code == 422
+
+
+async def test_chat_rejects_choice_id_without_a_session_id(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    """There's no pending choice without an existing conversation to check."""
+    resp = await chat_client.post("/v1/chat", json={"choice_id": "card"})
+
+    assert resp.status_code == 422
+
+
+async def test_chat_forwards_choice_id_to_respond() -> None:
+    app = create_app()
+    agent = _FakeAgent()
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post(
+            "/v1/chat",
+            json={"choice_id": "card", "session_id": str(_SESSION_ID)},
+        )
+
+    assert resp.status_code == 200
+    assert agent.received_choice_id == "card"
+
+
+async def test_chat_surfaces_a_pending_choice_in_the_response() -> None:
+    """When a turn suspends, the response's `choice` field carries what to
+    render — the client shouldn't have to parse `segments` itself."""
+    app = create_app()
+    choice_segment: dict[str, object] = {
+        "type": "choice",
+        "prompt": "¿Reembolso o crédito?",
+        "options": [{"id": "card", "label": "Tarjeta"}],
+    }
+    agent = _FakeAgent()
+    agent.segments = [choice_segment]
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/v1/chat", json={"message": "hello"})
+
+    assert resp.status_code == 200
+    assert resp.json()["choice"] == {
+        "prompt": "¿Reembolso o crédito?",
+        "options": [{"id": "card", "label": "Tarjeta"}],
+    }
+
+
+async def test_chat_response_has_no_choice_field_for_an_ordinary_turn(
+    chat_client: httpx.AsyncClient,
+) -> None:
+    resp = await chat_client.post("/v1/chat", json={"message": "hello"})
+
+    assert resp.json()["choice"] is None
+    assert resp.json()["needs_human"] is False
+
+
+async def test_chat_surfaces_needs_human_for_a_harness_level_escalation() -> None:
+    """A budget-exhausted resume (or an already-escalated session) returns a
+    reply that otherwise looks identical to an ordinary one — `needs_human`
+    is the only machine-readable signal a client has to tell them apart."""
+    app = create_app()
+    agent = _FakeAgent()
+    agent.needs_human = True
+    app.dependency_overrides[get_agent] = lambda: agent
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/v1/chat", json={"message": "hello"})
+
+    assert resp.status_code == 200
+    assert resp.json()["needs_human"] is True
+
+
 async def test_chat_rejects_more_images_than_the_per_turn_limit(
     chat_client: httpx.AsyncClient,
 ) -> None:
@@ -246,7 +357,8 @@ class _BoomAgent:
     async def respond(
         self,
         session_id: uuid.UUID,
-        user_message: str,
+        user_message: str | None = None,
+        choice_id: str | None = None,
         observer: Observer | None = None,
         source: str = "api",
         stream: bool = False,
