@@ -41,11 +41,16 @@ def decode_object(response: httpx.Response) -> dict[str, Any] | None:
     return body if isinstance(body, dict) else None
 
 
-def is_period(value: str) -> bool:
-    """True when ``value`` is a ``YYYY-MM`` period safe to put in a path."""
-    return bool(_PERIOD_RE.match(value))
+def is_period(value: object) -> bool:
+    """True when ``value`` is a ``YYYY-MM`` period safe to put in a path.
+
+    Takes ``object``, not ``str``: the registry forwards whatever the model
+    emitted, and ``input_schema`` documents the shape without enforcing it, so a
+    numeric ``period`` would otherwise reach the regex and raise.
+    """
+    return isinstance(value, str) and bool(_PERIOD_RE.match(value))
 
 
-def is_path_id(value: str) -> bool:
+def is_path_id(value: object) -> bool:
     """True when ``value`` is safe to interpolate as a single path segment."""
-    return bool(_ID_RE.match(value))
+    return isinstance(value, str) and bool(_ID_RE.match(value))

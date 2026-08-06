@@ -257,8 +257,10 @@ async def test_order_detail_reports_undecodable_body() -> None:
 
 async def test_register_2fa_phone_normalizes_local_format() -> None:
     def handle(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/v1/employees/emp_1":
+        if request.method == "GET" and request.url.path == "/api/v1/employees/emp_1":
             return httpx.Response(200, json={"merchantId": 1})
+        assert request.method == "POST"
+        assert request.url.path == "/api/v1/employees/emp_1/2fa/register-phone"
         assert b'"phone":"+584121234567"' in request.content
         return httpx.Response(200, text='{"phoneRegistered":true}')
 
@@ -284,3 +286,27 @@ async def test_register_2fa_phone_rejects_invalid_number() -> None:
 
     assert requests == []
     assert "not a valid Venezuelan mobile" in output
+
+
+async def test_tools_reject_non_string_arguments() -> None:
+    """`input_schema` documents argument types, it does not enforce them: the
+    registry forwards whatever the model emitted, so the guards take `object`."""
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"merchantId": 1})
+
+    async with _client(handle) as client:
+        period = await make_get_monthly_report_tool(client).fn(_MERCHANT, period=202607)
+        phone = await make_register_2fa_phone_tool(client).fn(
+            _EMPLOYEE, phone=4121234567
+        )
+        reason = await make_cancel_order_tool(client).fn(
+            _EMPLOYEE, order_number="197000001", reason_id="1"
+        )
+
+    assert "not a valid period" in period
+    assert "not a valid Venezuelan mobile" in phone
+    assert "numeric reason_id" in reason
+    assert requests == []

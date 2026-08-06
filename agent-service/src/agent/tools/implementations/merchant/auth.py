@@ -20,15 +20,19 @@ from agent.tools.registry import Tool
 _VE_MOBILE_RE = re.compile(r"^(?:\+?58|0)?(4\d{9})$")
 
 
-def normalize_ve_phone(raw: str) -> str | None:
+def normalize_ve_phone(raw: object) -> str | None:
     """Canonicalize a Venezuelan mobile to ``+58XXXXXXXXXX``, or ``None``.
 
     The model relays whatever the merchant typed — ``0412-123 4567``,
     ``(0412) 1234567``, ``+58 412 123 4567``. The mock compares the stored
     number by exact string equality, so a merchant re-registering their own
     number only gets the "already registered" answer if the value is
-    normalized first. An unparseable value is rejected here rather than sent.
+    normalized first. Takes ``object`` because the registry forwards whatever
+    the model emitted: ``input_schema`` documents the argument, it does not
+    enforce it, so a numeric value would otherwise reach ``re.sub`` and raise.
     """
+    if not isinstance(raw, str):
+        return None
     digits = re.sub(r"[\s()\-.]", "", raw)
     match = _VE_MOBILE_RE.match(digits)
     return f"+58{match.group(1)}" if match else None

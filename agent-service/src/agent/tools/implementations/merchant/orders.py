@@ -213,6 +213,10 @@ def make_cancel_order_tool(client: httpx.AsyncClient) -> Tool:
             return "Cancelling an order requires an employee identified by the portal."
         if not order_number:
             return "cancel_order needs an order_number."
+        # `bool` is an `int` subclass, so `True` would pass an isinstance check
+        # and reach the payload as a reason id.
+        if not isinstance(reason_id, int) or isinstance(reason_id, bool):
+            return "cancel_order needs a numeric reason_id."
         if reason_id <= 0:
             return "cancel_order needs a valid reason_id."
         _, error = await _owned_order(client, ctx, order_number)
