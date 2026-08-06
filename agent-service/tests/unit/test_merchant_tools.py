@@ -17,6 +17,7 @@ from agent.tools.implementations.merchant.catalog import (
 )
 from agent.tools.implementations.merchant.finance import (
     make_get_daily_conciliation_tool,
+    make_get_monthly_report_tool,
     make_get_payouts_tool,
 )
 from agent.tools.implementations.merchant.orders import (
@@ -206,3 +207,80 @@ async def test_store_list_is_scoped_to_principal_merchant() -> None:
         output = await make_list_merchant_stores_tool(client).fn(_MERCHANT)
 
     assert output == '{"data":[]}'
+
+
+async def test_monthly_report_rejects_traversal_period() -> None:
+    """httpx resolves `..` before sending, so an unvalidated period would walk
+    out of this merchant's prefix and reach another aliado's records."""
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, text='{"leaked":true}')
+
+    async with _client(handle) as client:
+        output = await make_get_monthly_report_tool(client).fn(
+            _MERCHANT, period="../../merchants/2/payouts"
+        )
+
+    assert requests == []
+    assert "not a valid period" in output
+
+
+async def test_monthly_report_accepts_documented_period() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/merchants/1/monthly-reports/2026-07"
+        return httpx.Response(200, text='{"period":"2026-07"}')
+
+    async with _client(handle) as client:
+        output = await make_get_monthly_report_tool(client).fn(
+            _MERCHANT, period="2026-07"
+        )
+
+    assert output == '{"period":"2026-07"}'
+
+
+async def test_order_detail_reports_undecodable_body() -> None:
+    """A 200 carrying an HTML error page must not surface as a generic
+    `Error running <tool>` string."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>502 upstream</html>")
+
+    async with _client(handle) as client:
+        output = await make_get_order_detail_tool(client).fn(
+            _MERCHANT, order_number="197000001"
+        )
+
+    assert "No order found" in output
+
+
+async def test_register_2fa_phone_normalizes_local_format() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/employees/emp_1":
+            return httpx.Response(200, json={"merchantId": 1})
+        assert b'"phone":"+584121234567"' in request.content
+        return httpx.Response(200, text='{"phoneRegistered":true}')
+
+    async with _client(handle) as client:
+        output = await make_register_2fa_phone_tool(client).fn(
+            _EMPLOYEE, phone="0412-123 4567"
+        )
+
+    assert output == '{"phoneRegistered":true}'
+
+
+async def test_register_2fa_phone_rejects_invalid_number() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"merchantId": 1})
+
+    async with _client(handle) as client:
+        output = await make_register_2fa_phone_tool(client).fn(
+            _EMPLOYEE, phone="no es un teléfono"
+        )
+
+    assert requests == []
+    assert "not a valid Venezuelan mobile" in output

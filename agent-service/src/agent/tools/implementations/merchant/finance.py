@@ -12,6 +12,11 @@ from __future__ import annotations
 import httpx
 
 from agent.tools.context import ToolContext
+from agent.tools.implementations.merchant._responses import (
+    decode_object,
+    is_path_id,
+    is_period,
+)
 from agent.tools.registry import Tool
 
 
@@ -136,8 +141,16 @@ def make_get_monthly_report_tool(client: httpx.AsyncClient) -> Tool:
         if not mid:
             return "No merchant is identified for this conversation."
         # If a specific period is requested, fetch the detail for that period.
+        # The period lands in the path and nothing downstream re-checks
+        # ownership, so an unvalidated value here would let a `..` segment walk
+        # out of this merchant's prefix and return another aliado's report.
         path = f"/api/v1/merchants/{mid}/monthly-reports"
         if period:
+            if not is_period(period):
+                return (
+                    f"'{period}' is not a valid period — use YYYY-MM "
+                    "(e.g. '2026-07'), or omit it to list the available ones."
+                )
             path = f"{path}/{period}"
         try:
             resp = await client.get(path)
@@ -187,12 +200,16 @@ def make_get_daily_conciliation_tool(client: httpx.AsyncClient) -> Tool:
                 "get_daily_conciliation needs a store_uuid. Either pass one "
                 "explicitly or ensure the conversation has a store identified."
             )
+        if not is_path_id(suid):
+            return f"No store found with id '{suid}'."
         try:
             store_response = await client.get(f"/api/v1/stores/{suid}")
         except httpx.RequestError:
             return "The merchant service is unavailable right now — try again shortly."
-        store = store_response.json() if store_response.status_code == 200 else None
-        if not isinstance(store, dict) or str(store.get("merchantId")) != (
+        store = (
+            decode_object(store_response) if store_response.status_code == 200 else None
+        )
+        if store is None or str(store.get("merchantId")) != (
             ctx.principal.merchant_id or ""
         ):
             return f"No store found with id '{suid}'."

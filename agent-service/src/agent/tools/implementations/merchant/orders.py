@@ -14,6 +14,7 @@ from __future__ import annotations
 import httpx
 
 from agent.tools.context import ToolContext
+from agent.tools.implementations.merchant._responses import decode_object, is_path_id
 from agent.tools.registry import Tool
 
 
@@ -25,6 +26,8 @@ def _merchant_id(ctx: ToolContext) -> str:
 async def _owned_order(
     client: httpx.AsyncClient, ctx: ToolContext, order_number: str
 ) -> tuple[httpx.Response | None, str | None]:
+    if not is_path_id(order_number):
+        return None, f"No order found with number '{order_number}'."
     try:
         response = await client.get(f"/api/v1/orders/{order_number}")
     except httpx.RequestError:
@@ -35,8 +38,8 @@ async def _owned_order(
         return None, (
             f"Could not look up order '{order_number}' (status {response.status_code})."
         )
-    body = response.json()
-    if not isinstance(body, dict) or str(body.get("merchantId")) != _merchant_id(ctx):
+    body = decode_object(response)
+    if body is None or str(body.get("merchantId")) != _merchant_id(ctx):
         # Deliberately indistinguishable from a missing order: never disclose
         # whether another merchant owns a supplied number.
         return None, f"No order found with number '{order_number}'."
@@ -228,7 +231,7 @@ def make_cancel_order_tool(client: httpx.AsyncClient) -> Tool:
         except httpx.RequestError:
             return "The order service is unavailable right now — try again shortly."
         if response.status_code != 200:
-            body = response.json() if response.text else {}
+            body = decode_object(response) or {}
             message = body.get("message") or body.get("error") or "Cancellation failed"
             return f"Could not cancel order: {message}"
         return response.text
@@ -275,14 +278,16 @@ def make_get_cancellation_reasons_tool(client: httpx.AsyncClient) -> Tool:
                 "Viewing cancellation reasons requires an employee identified "
                 "by the portal."
             )
+        if not is_path_id(employee_id):
+            return f"No employee found with id '{employee_id}'."
         try:
             employee_response = await client.get(f"/api/v1/employees/{employee_id}")
             employee = (
-                employee_response.json()
+                decode_object(employee_response)
                 if employee_response.status_code == 200
                 else None
             )
-            if not isinstance(employee, dict) or str(employee.get("merchantId")) != (
+            if employee is None or str(employee.get("merchantId")) != (
                 ctx.principal.merchant_id or ""
             ):
                 return f"No employee found with id '{employee_id}'."
