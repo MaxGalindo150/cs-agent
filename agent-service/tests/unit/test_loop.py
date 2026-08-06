@@ -169,6 +169,45 @@ async def test_tool_call_executes_then_returns_final_text() -> None:
     assert tool_result["content"] == "5"
 
 
+async def test_sensitive_tool_args_are_redacted_after_execution() -> None:
+    received: list[tuple[str, str]] = []
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def authenticate(security_code: str, phone: str) -> str:
+        received.append((security_code, phone))
+        return "ok"
+
+    reg = ToolRegistry()
+    _register(reg, "authenticate", authenticate)
+    client = FakeClient(
+        [
+            _msg(
+                _tool_use(
+                    "authenticate",
+                    {"security_code": "123456", "phone": "+58 412 123 4567"},
+                    "toolu_1",
+                ),
+                stop_reason="tool_use",
+            ),
+            _msg(_text("done")),
+        ]
+    )
+
+    result = await _run(
+        client,
+        "m",
+        "sys",
+        [{"role": "user", "content": "go"}],
+        reg,
+        observer=lambda kind, event: events.append((kind, event)),
+    )
+
+    assert received == [("123456", "+58 412 123 4567")]
+    expected = {"security_code": "[REDACTED]", "phone": "[REDACTED]"}
+    assert result.tool_calls[0]["args"] == expected
+    assert next(event for kind, event in events if kind == "tool")["args"] == expected
+
+
 async def test_tool_start_is_announced_before_the_tool_runs() -> None:
     """The UI shows work in progress off ``tool_start``, so it must be emitted
     before execution — not alongside the result, which lands seconds later."""
