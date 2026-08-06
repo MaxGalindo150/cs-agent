@@ -1,5 +1,5 @@
-// ── Seed dump script (stub — se implementa en la fase F) ───────────
-// Genera data/seed.json con el dataset completo.
+// ── Seed dump script ───────────────────────────────────────────────
+// Genera data/seed.json con el dataset completo (`bun run seed:dump`).
 
 import fs from "node:fs";
 import path from "node:path";
