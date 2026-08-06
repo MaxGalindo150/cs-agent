@@ -1,6 +1,14 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import { findEmployee, findPOS, getDB } from "../db.js";
 import { simulatedDelay } from "../utils/delay.js";
+
+// Los bodies POST llegaban tipados a mano y solo se comprobaba que existieran,
+// así que un `{"phone": 42}` pasaba el guard y se escribía en un campo `string`.
+// zod los valida de verdad y devuelve 400 con el detalle.
+const registerPhoneBody = z.object({ phone: z.string().min(1) });
+const verifyCodeBody = z.object({ code: z.string().min(1) });
+const linkQRBody = z.object({ activationCode: z.string().min(1) });
 
 export const employeeRoutes = new Hono();
 
@@ -22,15 +30,11 @@ employeeRoutes.post("/:id/2fa/register-phone", async (c) => {
     return c.json({ error: `No se encontró empleado ${c.req.param("id")}` }, 404);
   }
 
-  let body: { phone?: string };
+  let body: z.infer<typeof registerPhoneBody>;
   try {
-    body = await c.req.json();
+    body = registerPhoneBody.parse(await c.req.json());
   } catch {
-    return c.json({ error: "Body inválido" }, 400);
-  }
-
-  if (!body || typeof body !== "object" || !body.phone) {
-    return c.json({ error: "phone es obligatorio" }, 400);
+    return c.json({ error: "phone es obligatorio y debe ser un string" }, 400);
   }
 
   // Caso frecuente: el teléfono ya es el suyo
@@ -86,15 +90,11 @@ employeeRoutes.post("/:id/2fa/verify-code", async (c) => {
     return c.json({ error: `No se encontró empleado ${c.req.param("id")}` }, 404);
   }
 
-  let body: { code?: string };
+  let body: z.infer<typeof verifyCodeBody>;
   try {
-    body = await c.req.json();
+    body = verifyCodeBody.parse(await c.req.json());
   } catch {
-    return c.json({ error: "Body inválido" }, 400);
-  }
-
-  if (!body || typeof body !== "object" || !body.code) {
-    return c.json({ error: "code es obligatorio" }, 400);
+    return c.json({ error: "code es obligatorio y debe ser un string" }, 400);
   }
 
   if (!employee.phoneRegistered) {
@@ -153,15 +153,11 @@ posRoutes.post("/:uuid/link-qr", async (c) => {
     return c.json({ error: `No se encontró POS ${c.req.param("uuid")}` }, 404);
   }
 
-  let body: { activationCode?: string };
+  let body: z.infer<typeof linkQRBody>;
   try {
-    body = await c.req.json();
+    body = linkQRBody.parse(await c.req.json());
   } catch {
-    return c.json({ error: "Body inválido" }, 400);
-  }
-
-  if (!body || typeof body !== "object" || !body.activationCode) {
-    return c.json({ error: "activationCode es obligatorio" }, 400);
+    return c.json({ error: "activationCode es obligatorio y debe ser un string" }, 400);
   }
 
   pos.qrLinked = true;

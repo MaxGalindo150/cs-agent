@@ -7,7 +7,7 @@ import {
   storePaymentMethods,
   storeProducts,
 } from "../db.js";
-import { paginate, defaultPage, defaultLimit } from "../utils/response.js";
+import { paginate, defaultPage, defaultLimit, intParam } from "../utils/response.js";
 import { simulatedDelay } from "../utils/delay.js";
 
 export const storeRoutes = new Hono();
@@ -65,8 +65,8 @@ storeRoutes.get("/:uuid/daily-conciliation/history", async (c) => {
   let conciliations = storeConciliations(store.uuid);
   conciliations.sort((a, b) => b.date.localeCompare(a.date));
 
-  const limit = query["limit"] ? parseInt(query["limit"], 10) : 30;
-  const offset = query["offset"] ? parseInt(query["offset"], 10) : 0;
+  const limit = intParam(query, "limit", 30, { min: 1, max: 100 });
+  const offset = intParam(query, "offset", 0, { min: 0, max: Number.MAX_SAFE_INTEGER });
   const total = conciliations.length;
   const data = conciliations.slice(offset, offset + limit);
 

@@ -31,3 +31,18 @@ export function defaultLimit(query: Record<string, string | undefined>): number 
   if (!Number.isFinite(n) || n < 1) return 20;
   return Math.min(n, 100);
 }
+
+/** Entero de query acotado. Un valor no numérico cae al default en vez de
+ *  propagar NaN a `slice()` (que devuelve una página vacía sin explicar nada). */
+export function intParam(
+  query: Record<string, string | undefined>,
+  key: string,
+  fallback: number,
+  { min = 0, max = 100 }: { min?: number; max?: number } = {},
+): number {
+  const raw = query[key];
+  if (raw === undefined) return fallback;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
+}

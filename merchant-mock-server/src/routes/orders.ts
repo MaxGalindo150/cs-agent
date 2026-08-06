@@ -1,8 +1,20 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import { getDB, findOrder, findEmployee, orderInstallments } from "../db.js";
 import { paginate, defaultPage, defaultLimit } from "../utils/response.js";
 import { simulatedDelay } from "../utils/delay.js";
 import { CANCELLATION_REASONS } from "../seed/catalogs.js";
+
+// Mismo motivo que en employees.ts: el tipo declarado no se aplicaba en runtime.
+const cancelOrderBody = z.object({
+  employeeId: z.string().min(1),
+  reasonId: z.number().int().optional(),
+  securityCode: z.string().optional(),
+});
+const registerInvoiceBody = z.object({
+  employeeId: z.string().min(1),
+  invoiceNumber: z.string().min(1),
+});
 
 export const orderRoutes = new Hono();
 
@@ -107,15 +119,11 @@ orderRoutes.post("/:orderNumber/cancel", async (c) => {
     return c.json({ error: `No se encontró orden ${c.req.param("orderNumber")}` }, 404);
   }
 
-  let body: { employeeId?: string; reasonId?: number; securityCode?: string };
+  let body: z.infer<typeof cancelOrderBody>;
   try {
-    body = await c.req.json();
+    body = cancelOrderBody.parse(await c.req.json());
   } catch {
-    return c.json({ error: "Body inválido" }, 400);
-  }
-
-  if (!body || typeof body !== "object" || !body.employeeId) {
-    return c.json({ error: "employeeId es obligatorio" }, 400);
+    return c.json({ error: "employeeId es obligatorio y debe ser un string" }, 400);
   }
 
   const employee = findEmployee(body.employeeId);
@@ -228,15 +236,14 @@ orderRoutes.post("/:orderNumber/invoice", async (c) => {
     return c.json({ error: `No se encontró orden ${c.req.param("orderNumber")}` }, 404);
   }
 
-  let body: { employeeId?: string; invoiceNumber?: string };
+  let body: z.infer<typeof registerInvoiceBody>;
   try {
-    body = await c.req.json();
+    body = registerInvoiceBody.parse(await c.req.json());
   } catch {
-    return c.json({ error: "Body inválido" }, 400);
-  }
-
-  if (!body || typeof body !== "object" || !body.employeeId || !body.invoiceNumber) {
-    return c.json({ error: "employeeId e invoiceNumber son obligatorios" }, 400);
+    return c.json(
+      { error: "employeeId e invoiceNumber son obligatorios y deben ser strings" },
+      400,
+    );
   }
 
   const employee = findEmployee(body.employeeId);
