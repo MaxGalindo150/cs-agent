@@ -4,7 +4,7 @@
 // → conciliaciones diarias → reportes mensuales + payouts + facturas
 // → promociones, productos, POS, payment methods, onboarding.
 
-import { initFaker, f } from "./faker.js";
+import { initFaker, f, SEED_NOW } from "./faker.js";
 import { resetIdCounter } from "../utils/id.js";
 import {
   resetOrderNumbers,
@@ -148,8 +148,8 @@ export function runSeed(): void {
   for (const store of db.stores.values()) {
     const empCount = randInt(2, 4);
     const roles: ("ADMIN" | "MANAGER" | "CASHIER")[] = ["ADMIN"];
-    // Asegurar al menos un MANAGER si hay >2 empleados
-    if (empCount >= 3) roles.push("MANAGER");
+    // El primer no-ADMIN es MANAGER cuando hay >2 empleados, así que `roles`
+    // termina con exactamente empCount entradas y un solo MANAGER garantizado.
     for (let i = 1; i < empCount; i++) {
       roles.push(i === 1 && empCount >= 3 ? "MANAGER" : pick(["CASHIER", "MANAGER", "CASHIER"]));
     }
@@ -438,18 +438,21 @@ export function runSeed(): void {
         // Pago inicial (downPayment) va en la cuota 1
         if (installmentNumber === 1 && (instStatus === "DONE" || f.datatype.boolean({ probability: 0.7 }))) {
           const paymentMethod = pick(["PAGO_MOVIL", "TRANSFERENCIA", "EFECTIVO", "TARJETA"] as const);
+          const downPaymentVerified = instStatus === "DONE";
           payments.push({
             paymentId: `pmt_${f.string.numeric({ length: 6 })}`,
             assignedAmount: installmentBase + downPaymentAmount,
             paymentMethod: { name: paymentMethod },
-            paymentStatus: "VERIFIED",
+            paymentStatus: downPaymentVerified ? "VERIFIED" : "PENDING",
             referenceNumber: paymentMethod === "PAGO_MOVIL" || paymentMethod === "TRANSFERENCIA"
               ? veBankReference()
               : null,
             amountVES: paymentMethod === "PAGO_MOVIL" || paymentMethod === "TRANSFERENCIA"
               ? toVES(installmentBase + downPaymentAmount)
               : null,
-            paymentValidationDate: isoDaysAgo(Math.max(0, daysAgo - 1)),
+            paymentValidationDate: downPaymentVerified
+              ? isoDaysAgo(Math.max(0, daysAgo - 1))
+              : null,
             createdAt,
           });
         }
@@ -550,7 +553,7 @@ export function runSeed(): void {
       const ivaAmount = Math.round(techServicesAmount * 0.16); // 16% IVA
       const isrlRetainedAmount = Math.round(grossAmount * 0.02); // 2% ISRL
       const serviceFeeTotal = techServicesAmount + ivaAmount;
-      const adjustments = f.number.int({ min: -500, max: 500 }) * 100; // ±$5 aleatorio
+      const adjustments = f.number.int({ min: -500, max: 500 }); // ±$5.00 en centavos
       const netAmount = grossAmount - serviceFeeTotal - isrlRetainedAmount + adjustments;
 
       const expectedAmount = periodOrders.reduce((s, o) => s + o.financedAmount, 0);
@@ -872,8 +875,9 @@ function generateOrderNumber(): string {
 }
 
 function monthLabel(monthsAgo: number): string {
-  const d = new Date(Date.now() - monthsAgo * 30 * 86_400_000);
-  return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, "0")}`;
+  const now = new Date(SEED_NOW);
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsAgo, 1));
+  return `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, "0")}`;
 }
 
 function countScenarioTags(db: Database): number {

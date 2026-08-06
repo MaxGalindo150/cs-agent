@@ -1,5 +1,6 @@
 import type { Scenario } from "./types.js";
 import { scenarioHelpers as h } from "./types.js";
+import { SEED_NOW } from "../faker.js";
 
 // ── Escenarios de órdenes ──────────────────────────────────────────
 
@@ -50,7 +51,7 @@ export const cancelOutOfDayWindow: Scenario = {
     );
     for (const emp of managers) {
       // Buscar orden cancelable de ayer o más antigua en su store
-      const today = new Date().toISOString().slice(0, 10);
+      const today = new Date(SEED_NOW).toISOString().slice(0, 10);
       const orders = [...db.orders.values()].filter(
         (o) =>
           o.storeUuid === emp.storeUuid &&

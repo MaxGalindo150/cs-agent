@@ -1,5 +1,6 @@
 import type { Scenario } from "./types.js";
 import { scenarioHelpers as h } from "./types.js";
+import { SEED_NOW } from "../faker.js";
 
 // ── Escenarios de catálogo / configuración ─────────────────────────
 
@@ -68,7 +69,7 @@ export const modelMigrationPending: Scenario = {
         readyToGo: false,
         plan: "EXPRESS",
         channelsSelected: [],
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(SEED_NOW).toISOString(),
         scenarioTags: ["model_migration_pending"],
       });
       return;
@@ -102,7 +103,7 @@ export const onboardingStuckDocuments: Scenario = {
       readyToGo: false,
       plan: null,
       channelsSelected: ["IN_STORE"],
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(SEED_NOW).toISOString(),
       scenarioTags: ["onboarding_stuck_documents"],
     });
   },
@@ -121,8 +122,8 @@ export const inventoryBulkJobFailed: Scenario = {
         storeUuid: store.uuid,
         fileName: "carga_productos.xlsx",
         status: "FAILED",
-        createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
-        finishedAt: new Date(Date.now() - 1 * 86_400_000).toISOString(),
+        createdAt: new Date(SEED_NOW - 2 * 86_400_000).toISOString(),
+        finishedAt: new Date(SEED_NOW - 1 * 86_400_000).toISOString(),
         totalProducts: 50,
         processedProducts: 23,
         successCount: 18,

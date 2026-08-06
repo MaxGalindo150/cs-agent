@@ -1,7 +1,7 @@
 // ── Generadores de datos helpers ───────────────────────────────────
 // Funciones utilitarias para crear datos coherentes con sabor VE.
 
-import { f } from "./faker.js";
+import { f, SEED_NOW } from "./faker.js";
 import {
   VE_FIRST_NAMES,
   VE_LAST_NAMES,
@@ -11,11 +11,13 @@ import {
 } from "./catalogs.js";
 
 // ── Tiempo ─────────────────────────────────────────────────────────
-const NOW = Date.now();
+// Todo timestamp sembrado cuelga de SEED_NOW (ver faker.ts), nunca del reloj
+// de pared: dos llamadas dentro de una corrida no pueden discrepar.
+const NOW = SEED_NOW;
 const DAY = 86_400_000;
 
 export function nowISO(): string {
-  return new Date().toISOString();
+  return new Date(NOW).toISOString();
 }
 
 export function isoDaysAgo(days: number): string {

@@ -1,5 +1,6 @@
 import type { Scenario } from "./types.js";
 import { scenarioHelpers as h } from "./types.js";
+import { SEED_NOW } from "../faker.js";
 
 // ── Escenarios financieros ─────────────────────────────────────────
 
@@ -64,15 +65,18 @@ export const invoicesNotSentMultiMonth: Scenario = {
         }
         // Crear facturas retroactivas para simular 5 meses
         for (let m = 4; m <= 5; m++) {
-          const periodFrom = new Date(
-            Date.now() - m * 30 * 86_400_000,
-          ).toISOString();
-          const periodTo = new Date(
-            Date.now() - (m - 1) * 30 * 86_400_000,
-          ).toISOString();
-          const periodLabel = `${new Date(periodFrom).getFullYear()}-${(
-            new Date(periodFrom).getMonth() + 1
-          )
+          // Meses calendario en UTC desde el reloj del seed: dos valores de `m`
+          // distintos no pueden caer en el mismo periodo (lo que duplicaría
+          // números de factura y URLs de PDF).
+          const seedNow = new Date(SEED_NOW);
+          const monthStart = (monthsAgo: number) =>
+            new Date(
+              Date.UTC(seedNow.getUTCFullYear(), seedNow.getUTCMonth() - monthsAgo, 1),
+            );
+          const from = monthStart(m);
+          const periodFrom = from.toISOString();
+          const periodTo = monthStart(m - 1).toISOString();
+          const periodLabel = `${from.getUTCFullYear()}-${(from.getUTCMonth() + 1)
             .toString()
             .padStart(2, "0")}`;
           db.invoices.push({
