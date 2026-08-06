@@ -42,7 +42,9 @@ export function intParam(
 ): number {
   const raw = query[key];
   if (raw === undefined) return fallback;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n)) return fallback;
+  // parseInt("10invalid") daría 10: se exige que el valor sea entero completo.
+  if (!/^-?\d+$/.test(raw.trim())) return fallback;
+  const n = Number.parseInt(raw.trim(), 10);
+  if (!Number.isSafeInteger(n)) return fallback;
   return Math.min(Math.max(n, min), max);
 }
