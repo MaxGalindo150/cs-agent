@@ -45,7 +45,11 @@ class Settings(BaseSettings):
 
     # --- CORS (widget in Webflow calls cross-origin) ---
     allowed_origins: Annotated[list[str], NoDecode] = Field(
-        default=["http://localhost:5173", "http://localhost:3000"],
+        default=[
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://localhost:3002",
+        ],
         alias="ALLOWED_ORIGINS",
     )
 
@@ -86,6 +90,12 @@ class Settings(BaseSettings):
     # --- External systems ---
     # BNPL backend the agent's tools query (see agent/tools/bnpl.py).
     bnpl_api_url: str = Field(default="http://localhost:3001", alias="BNPL_API_URL")
+
+    # Merchant backend (aliado) the agent's tools query — orders, payouts,
+    # invoices, conciliation, etc. for the merchant support agent.
+    merchant_api_url: str = Field(
+        default="http://localhost:3002", alias="MERCHANT_API_URL"
+    )
 
     # --- Database (agent memory & sessions) ---
     # Async SQLAlchemy URL for the `customer_support` Postgres; this service

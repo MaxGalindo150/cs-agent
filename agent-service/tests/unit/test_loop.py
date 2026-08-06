@@ -15,7 +15,7 @@ import anthropic
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 
 from agent.identity import Principal
-from agent.loop.agent import LoopResult, run_loop
+from agent.loop.agent import LoopResult, _safe_args, run_loop
 from agent.tools.context import ToolContext
 from agent.tools.registry import Tool, ToolRegistry
 
@@ -167,6 +167,45 @@ async def test_tool_call_executes_then_returns_final_text() -> None:
     assert tool_result["type"] == "tool_result"
     assert tool_result["tool_use_id"] == "toolu_1"
     assert tool_result["content"] == "5"
+
+
+async def test_sensitive_tool_args_are_redacted_after_execution() -> None:
+    received: list[tuple[str, str]] = []
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def authenticate(security_code: str, phone: str) -> str:
+        received.append((security_code, phone))
+        return "ok"
+
+    reg = ToolRegistry()
+    _register(reg, "authenticate", authenticate)
+    client = FakeClient(
+        [
+            _msg(
+                _tool_use(
+                    "authenticate",
+                    {"security_code": "123456", "phone": "+58 412 123 4567"},
+                    "toolu_1",
+                ),
+                stop_reason="tool_use",
+            ),
+            _msg(_text("done")),
+        ]
+    )
+
+    result = await _run(
+        client,
+        "m",
+        "sys",
+        [{"role": "user", "content": "go"}],
+        reg,
+        observer=lambda kind, event: events.append((kind, event)),
+    )
+
+    assert received == [("123456", "+58 412 123 4567")]
+    expected = {"security_code": "[REDACTED]", "phone": "[REDACTED]"}
+    assert result.tool_calls[0]["args"] == expected
+    assert next(event for kind, event in events if kind == "tool")["args"] == expected
 
 
 async def test_tool_start_is_announced_before_the_tool_runs() -> None:
@@ -707,3 +746,28 @@ async def test_streaming_failure_falls_back_to_create() -> None:
     assert client.messages.create_calls == 1
     # The hiccup must be observable, not swallowed silently.
     assert any(kind == "stream_error" for kind, _ in events)
+
+
+def test_redaction_ignores_key_casing_and_separators() -> None:
+    """Redaction must not depend on how a schema author capitalized the key: a
+    tool declaring `Phone` or `security-code` would otherwise leak into traces
+    and the persisted turn tail with no sign anything was missed."""
+    redacted = _safe_args(
+        {
+            "Phone": "+58 412 123 4567",
+            "security-code": "123456",
+            "API_KEY": "sk-live",
+            "Authorization": "Bearer x",
+            "orderNumber": "197000001",
+            "nested": [{"securityCode": "654321"}],
+        }
+    )
+
+    assert redacted == {
+        "Phone": "[REDACTED]",
+        "security-code": "[REDACTED]",
+        "API_KEY": "[REDACTED]",
+        "Authorization": "[REDACTED]",
+        "orderNumber": "197000001",
+        "nested": [{"securityCode": "[REDACTED]"}],
+    }

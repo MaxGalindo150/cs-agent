@@ -31,6 +31,7 @@ cs-agent/
 ├── agent-service/   FastAPI + the agent loop (agent/ = the brain, service/ = the transport)
 ├── frontend/        Next.js chat widget + dashboard
 ├── mock-server/     BNPL backend the agent's tools call against (Hono + Bun)
+├── merchant-mock-server/  Merchant (aliado) backend — orders, payouts, invoices (Hono + Bun)
 └── docker-compose.yml
 ```
 
@@ -42,6 +43,9 @@ cs-agent/
   small dashboard for the simulated host-app identity.
 - **`mock-server/`** — a stand-in BNPL backend (orders, payments, users) so
   the agent's tools have something real to call locally.
+- **`merchant-mock-server/`** — a stand-in merchant (aliado) backend (orders,
+  payouts, invoices, conciliation, promotions, POS, inventory) so the merchant
+  support agent has realistic data to resolve cases with.
 
 ## Quickstart
 
@@ -54,6 +58,7 @@ docker compose up --build
 | `frontend`      | http://localhost:3000           | Next.js chat UI                      |
 | `agent-service` | http://localhost:8000 (`/docs`) | FastAPI agent loop                   |
 | `mock-server`   | http://localhost:3001           | BNPL backend the agent's tools call  |
+| `merchant-mock-server` | http://localhost:3002    | Merchant (aliado) backend            |
 | `phoenix`       | http://localhost:6006           | OTel trace viewer (local dev)        |
 | `postgres`      | localhost:5433                  | agent memory & sessions              |
 

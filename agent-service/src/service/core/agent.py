@@ -10,14 +10,23 @@ values into ``build_agent`` (CLAUDE.md §4), so nothing under ``agent/`` ever se
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
+
 from anthropic import AsyncAnthropic
 from fastapi import Request
 
 from agent.app import Agent, build_agent
 from agent.memory.db import Database, DatabaseConfig
 from agent.memory.embeddings import Embedder, VoyageEmbedder
+from agent.profiles import get_profile
 from agent.tools.registry import ToolRegistry
 from service.core.config import Settings
+
+if TYPE_CHECKING:
+    # Import-time only: service/core/profiles.py imports the builders from this
+    # module, so a runtime import here would be a cycle.
+    from service.core.profiles import ProfileRuntime
 
 
 def build_database(settings: Settings) -> Database:
@@ -42,6 +51,7 @@ def build_service_agent(
     db: Database,
     tools: ToolRegistry,
     embedder: Embedder | None,
+    soul: str = "",
 ) -> Agent:
     """Assemble the Agent from process-wide parts via the brain-side factory."""
     return build_agent(
@@ -53,13 +63,19 @@ def build_service_agent(
         trace_dir=settings.trace_dir,
         otel_endpoint=settings.otel_endpoint or None,
         embedder=embedder,
+        soul=soul,
     )
 
 
 def get_agent(request: Request) -> Agent:
-    """Dependency: the process-wide Agent assembled at startup."""
-    agent: Agent = request.app.state.agent
-    return agent
+    """Dependency: the Agent for the profile this request asks for.
+
+    One Agent per registered profile is assembled at startup; the
+    ``X-Agent-Profile`` header picks one (unknown or absent → the default
+    profile). Adding a profile does not touch this function.
+    """
+    runtimes: Mapping[str, ProfileRuntime] = request.app.state.profiles
+    return runtimes[get_profile(request.headers.get("X-Agent-Profile")).name].agent
 
 
 def get_database(request: Request) -> Database:

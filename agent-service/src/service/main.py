@@ -24,21 +24,16 @@ from anthropic import APIError
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from agent.tools import build_registry
 from service import SERVICE_NAME, __version__
 from service.api.errors import handle_provider_error
 from service.api.health import router as health_router
 from service.api.v1.router import router as v1_router
-from service.core.agent import (
-    build_database,
-    build_embedder,
-    build_service_agent,
-)
+from service.core.agent import build_database, build_embedder
 from service.core.config import Settings, get_settings
 from service.core.limits import MaxBodySizeMiddleware
 from service.core.llm import build_anthropic_client
 from service.core.migrations import upgrade_to_head
-from service.core.tooling import build_bnpl_client
+from service.core.profiles import build_profile_runtimes
 from service.worker import router as worker_router
 
 
@@ -91,28 +86,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Build the LLM client once and reuse it — a per-request client would leak
     # connections. Routes reach it via the get_llm_client dependency.
     app.state.llm = build_anthropic_client(settings)
-    app.state.bnpl = build_bnpl_client(settings)
-    # Durable stores for memory & sessions (pooled) — built before the registry
+    # Durable stores for memory & sessions (pooled) — built before the registries
     # since manage_memory (agent/tools/implementations/memory.py) needs it.
     app.state.db = build_database(settings)
-    # Assemble the tool registry once, bound to the process-wide BNPL client
-    # and the memory database.
-    app.state.registry = build_registry(app.state.bnpl, app.state.db)
-    # The assembled Agent — the brain the request path calls. Built once;
-    # nothing conversation-specific lives on it.
     app.state.embedder = build_embedder(settings)
-    app.state.agent = build_service_agent(
+    # One backend client, tool registry and Agent per registered profile
+    # (agent/profiles/). Adding a profile changes nothing here.
+    app.state.profiles = build_profile_runtimes(
         settings,
-        client=app.state.llm,
+        llm=app.state.llm,
         db=app.state.db,
-        tools=app.state.registry,
         embedder=app.state.embedder,
     )
+    log.info("profiles.ready", profiles=sorted(app.state.profiles))
     try:
         yield
     finally:
         await app.state.llm.close()
-        await app.state.bnpl.aclose()
+        for runtime in app.state.profiles.values():
+            await runtime.client.aclose()
         await app.state.embedder.aclose()
         await app.state.db.dispose()
         log.info("service.stop", service=SERVICE_NAME)

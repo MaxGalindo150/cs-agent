@@ -20,40 +20,21 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from agent.identity import Principal
 from agent.observability import LoopEvent, Observer
+from agent.prompts import load_prompt
 
-DEFAULT_SOUL = """\
-You are Cheo, a customer-support agent for Cashea, a Buy-Now-Pay-Later service.
-You are concise, warm, and proactive.
-
-How you work:
-- Ground every answer in your tools. Never invent order, payment, shipment, or
-  account details — look them up. If you're missing an id or the data isn't
-  there, say so plainly or ask the customer for what you need (e.g. the order id).
-- Relay tool results honestly: state what you actually found or did, never a
-  status, amount, or action the tool output doesn't support.
-- Never promise an action you can't verify or resolve yourself (a refund, a
-  manual account fix, anything outside what you can do here) — call
-  escalate_to_human and tell the customer, in plain terms, that you can't
-  handle that one yourself and a person will follow up. Never mention tools,
-  systems, or your own limitations mechanically — just say plainly you can't
-  help with that specific thing.
-- You can see images the customer attaches — describe or reference what's in
-  them freely, that's not "inventing" anything. But an image alone never
-  proves a fact you'd normally verify with a tool (a payment, an order
-  status) — if what you see needs verifying before you act on it, say so and
-  check with a tool, don't just take the image's word for it.
-
-Your tools' descriptions say what each one does and when to use it. Detailed
-procedures for specific situations arrive as skill instructions when they apply.
-"""
+# The buyer persona, read from agent/prompts/buyer.md at import. Kept as a
+# module constant so a bare Session (tests, scripts) still has a soul without
+# knowing about profiles; the service always passes the profile's own.
+DEFAULT_SOUL = load_prompt("buyer")
 
 
 def load_soul() -> str:
-    """The persona. Waku reads an editable SOUL.md from the user's home dir
+    """The buyer persona. Waku read an editable SOUL.md from the user's home dir
     (procedural memory you can hand-edit); serverless has no durable local disk,
-    so for now the soul is this constant. A config- or DB-backed editable soul
-    is a later decision."""
+    so the soul ships with the code as a versioned prompt file. A config- or
+    DB-backed editable soul is a later decision."""
     return DEFAULT_SOUL
 
 
@@ -61,13 +42,20 @@ class Session:
     """Holds one conversation: the chat history plus the recipe for the system
     prompt. One Session per gateway connection."""
 
-    def __init__(self, session_id: uuid.UUID, memory: Any = None) -> None:
+    def __init__(
+        self, session_id: uuid.UUID, memory: Any = None, soul: str = ""
+    ) -> None:
         # session_id is a real chat_sessions PK (created up front), not Waku's
         # free-string tag — chat_messages FKs to it. Required and first: a UUID
         # has no literal default, and a required arg can't follow `memory=None`.
         self.session_id = session_id
         self.memory = memory  # agent.memory.Memory (None until it's wired)
         self.history: list[dict[str, Any]] = []
+        # The persona this session runs with — passed by the Agent so different
+        # profiles (buyer vs merchant) can coexist without load_soul being
+        # profile-aware. Empty default falls back to the buyer soul (backward
+        # compat for tests that build a bare Session).
+        self._soul = soul or DEFAULT_SOUL
 
     async def fixed_response(self, user_message: str) -> str | None:
         """A canned reply that must bypass the LLM entirely, or ``None`` if
@@ -94,14 +82,53 @@ class Session:
         user_message: str,
         user_id: str | None = None,
         notify: Observer | None = None,
+        principal: Principal | None = None,
     ) -> str:
         # The service should know the request-handling clock so the model can
         # resolve relative dates ("ayer", "en 30 minutos"). TODO: timezone via env.
         now = datetime.now().astimezone()
         parts = [
-            load_soul(),
+            self._soul,
             f"\nRight now it is {now:%A, %Y-%m-%d %H:%M} ({now:%Z}, UTC{now:%z}).",
         ]
+
+        # Tell the model whether the host app already identified the caller,
+        # without injecting raw header values into the system prompt. ToolContext
+        # carries the actual ids; the model only needs to know it should use the
+        # scoped tools instead of asking the caller to identify themselves again.
+        if principal is None:
+            parts.append(
+                "\nCurrent caller context (provided by the host application):\n"
+                "- No caller is identified. Identity-scoped tools are unavailable.\n"
+                "- For account-specific requests, do not ask for account identifiers "
+                "and do not offer a lookup. Tell the caller to identify themselves "
+                "through the host application first. You may still answer general "
+                "questions."
+            )
+        else:
+            if principal.profile == "merchant":
+                employee_context = (
+                    "An employee is also identified for employee-specific actions."
+                    if principal.employee_id
+                    else (
+                        "No employee is identified; ask for one only when the task "
+                        "requires it."
+                    )
+                )
+                parts.append(
+                    "\nCurrent caller context (provided by the host application):\n"
+                    "- A merchant is already identified. Do not ask for their RIF or "
+                    "business name merely to identify them.\n"
+                    "- Merchant-scoped tools receive the merchant identity from the "
+                    "harness. Never ask for or pass a merchant_id in tool calls.\n"
+                    f"- {employee_context}"
+                )
+            else:
+                parts.append(
+                    "\nCurrent caller context (provided by the host application):\n"
+                    "- A customer is already identified. Identity-scoped tools receive "
+                    "that identity from the harness; do not ask for their user id."
+                )
 
         if self.memory is not None:
             # Hero moment #1: a cheap judge decides IF we retrieve at all —

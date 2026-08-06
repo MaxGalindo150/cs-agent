@@ -37,6 +37,11 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The souls are prompt files, not string literals (agent/prompts/), so they have
+# to ship inside the wheel alongside the modules that read them.
+[tool.setuptools.package-data]
+"agent.prompts" = ["*.md"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

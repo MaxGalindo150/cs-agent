@@ -39,6 +39,38 @@ from agent.observability import LoopEvent, Observer
 from agent.tools.context import ToolContext
 from agent.tools.registry import ToolRegistry
 
+# Compared case- and separator-insensitively (see _is_sensitive), so one entry
+# covers `phone`, `Phone` and `phone_number`-style casing differences across
+# tool schemas. Redaction must not depend on a schema author's capitalization.
+_SENSITIVE_ARG_KEYS = frozenset(
+    {
+        "apikey",
+        "authorization",
+        "code",
+        "email",
+        "password",
+        "phone",
+        "securitycode",
+        "token",
+    }
+)
+
+
+def _is_sensitive(key: str) -> bool:
+    return key.lower().replace("_", "").replace("-", "") in _SENSITIVE_ARG_KEYS
+
+
+def _safe_args(value: Any) -> Any:
+    """Redact credentials/PII before tool args reach observers or persistence."""
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]" if _is_sensitive(key) else _safe_args(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_safe_args(item) for item in value]
+    return value
+
 
 @dataclass
 class LoopResult:
@@ -204,10 +236,11 @@ async def run_loop(
                     "calls": [
                         {
                             "tool": c.name,
-                            "args": c.input,
+                            "args": _safe_args(c.input),
                             "output": r["content"],
                             "label": tools.label(
-                                c.name, cast("dict[str, Any]", c.input)
+                                c.name,
+                                cast("dict[str, Any]", _safe_args(c.input)),
                             ),
                         }
                         for c, r in zip(tool_uses, refusals, strict=True)
@@ -219,16 +252,17 @@ async def run_loop(
         if suspending:
             call = suspending[0]  # exactly one — the mixed-batch case above handles >1
             args = cast("dict[str, Any]", call.input)
+            observable_args = cast("dict[str, Any]", _safe_args(args))
             notify(
                 "tool_start",
                 {
                     "tool": call.name,
-                    "args": args,
-                    "label": tools.label(call.name, args),
+                    "args": observable_args,
+                    "label": tools.label(call.name, observable_args),
                 },
             )
             output = await tools.execute(call.name, call.input, ctx)
-            event = {"tool": call.name, "args": args, "output": output}
+            event = {"tool": call.name, "args": observable_args, "output": output}
             result.tool_calls.append(event)
             notify("tool", event)
             prompt = args.get("prompt", "")
@@ -263,14 +297,15 @@ async def run_loop(
         # and showing a live tool call is exactly what an observer is for.
         for call in tool_uses:
             args = cast("dict[str, Any]", call.input)
+            observable_args = cast("dict[str, Any]", _safe_args(args))
             notify(
                 "tool_start",
                 {
                     "tool": call.name,
-                    "args": args,
+                    "args": observable_args,
                     # The tool words its own progress line (registry.Tool.label),
                     # so a client renders it without knowing the tool exists.
-                    "label": tools.label(call.name, args),
+                    "label": tools.label(call.name, observable_args),
                 },
             )
         outputs = await asyncio.gather(
@@ -280,10 +315,11 @@ async def run_loop(
         calls: list[LoopEvent] = []
         for call, output in zip(tool_uses, outputs, strict=True):
             args = cast("dict[str, Any]", call.input)
-            event = {"tool": call.name, "args": args, "output": output}
+            observable_args = cast("dict[str, Any]", _safe_args(args))
+            event = {"tool": call.name, "args": observable_args, "output": output}
             result.tool_calls.append(event)
             notify("tool", event)
-            calls.append({**event, "label": tools.label(call.name, args)})
+            calls.append({**event, "label": tools.label(call.name, observable_args)})
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": call.id, "content": output}
             )

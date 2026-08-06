@@ -15,6 +15,7 @@ import re
 import uuid
 
 from agent.app import AgentConfig
+from agent.identity import Principal
 from agent.runtime.session import Session
 
 
@@ -39,13 +40,31 @@ async def test_system_prompt_includes_a_clock_with_hh_mm() -> None:
     assert re.search(r"\b\d{2}:\d{2}\b", system), "system prompt missing an HH:MM clock"
 
 
-async def test_build_system_without_memory_is_soul_plus_clock_only() -> None:
-    # With no memory wired, working memory degrades to SOUL + clock: no retrieval,
-    # no skills sections (Memory is optional by construction).
+async def test_build_system_without_memory_omits_memory_sections() -> None:
+    # With no memory wired, working memory keeps only static/runtime context: no
+    # retrieval or skills sections (Memory is optional by construction).
     system = await Session(uuid.uuid4(), memory=None).build_system("hola")
     assert "Cheo" in system  # the SOUL persona is present
+    assert "No caller is identified" in system
     assert "Relevant memory" not in system
     assert "Relevant skill instructions" not in system
+
+
+async def test_build_system_tells_merchant_agent_identity_is_already_scoped() -> None:
+    principal = Principal(
+        user_id="merchant:1",
+        profile="merchant",
+        merchant_id="1",
+    )
+
+    system = await Session(uuid.uuid4(), memory=None).build_system(
+        "¿Cuántas órdenes tengo?", principal=principal
+    )
+
+    assert "A merchant is already identified" in system
+    assert "Do not ask for their RIF" in system
+    assert "merchant:1" not in system
+    assert "merchant_id=1" not in system
 
 
 def test_fresh_session_carries_its_id() -> None:

@@ -1,0 +1,1993 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cashea — Portal del Aliado (Mock)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Pinned with Subresource Integrity: DOMPurify is what sanitizes assistant
+       Markdown before it reaches innerHTML, so a CDN serving modified code would
+       silently disable that. marked is pinned for the same reason (it produces
+       the HTML DOMPurify then cleans). The Tailwind CDN build has no versioned
+       URL to pin — it is dev-only styling and touches no untrusted input. -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
+    integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+"
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"
+    integrity="sha384-JEyTNhjM6R1ElGoJns4U2Ln4ofPcqzSsynQkmEc/KGy6336qAZl70tDLufbkla+3"
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    // Cashea palette + shadows, copied verbatim from merchant-web/tailwind.config.js
+    // so the mock portal matches the real aliado portal. Only the scales used by
+    // this page are included.
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ["'Open Sans'", 'system-ui', 'sans-serif'] },
+          boxShadow: {
+            sidebar: '0 4px 48px 0 rgba(0,0,0,0.08), 0 8px 12px 0 rgba(0,0,0,0.08)',
+            panel: '0 12px 16px 0 rgba(0,0,0,0.08), 0 4px 56px 0 rgba(0,0,0,0.08)',
+          },
+          colors: {
+            cashea: {
+              gray: {
+                2: '#303134', 13: '#F2F2F2', 14: '#1D1929', 15: '#181919',
+                16: '#94979E', 17: '#61646B', 18: '#E6E7E8', 19: '#AFB1B6',
+                20: '#F5F5F5', 21: '#FAFAFA', 22: '#E4E5E6',
+              },
+              green: { 12: '#E9FDF8', 14: '#277353', 15: '#ABEDD1' },
+              // El amarillo Cashea nunca va como texto sobre blanco (contraste
+              // ~1.4:1). Solo relleno, siempre con texto gris-15 encima.
+              yellow: { 3: '#FFDE54', 4: '#FFE165', 11: '#FFF8DD', 14: '#FFF9A8' },
+              red: { 11: '#FDD4D4', 12: '#FEEAEA', 13: '#E0291F' },
+              'smoke-white': '#FEFEFE',
+            },
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { font-family: 'Open Sans', system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+    .spinner { border: 3px solid #E6E7E8; border-top: 3px solid #181919; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Sidebar nav item, mirroring merchant-web's NavItem: 16px radius pill,
+       pale-yellow active fill with black label (14:1 de contraste). */
+    .nav-item {
+      display: flex; align-items: center; gap: 0.5rem;
+      min-height: 2.5rem; padding: 0.5rem;
+      border-radius: 16px; color: #303134;
+      font-size: 0.875rem; font-weight: 600;
+      transition: background-color 200ms, color 200ms;
+      overflow: hidden; white-space: nowrap;
+    }
+    .nav-item:hover { background-color: #F2F2F3; }
+    .nav-item.active { background-color: #FFF9A8; color: #181919; font-weight: 700; }
+    .nav-item.active svg { color: #181919; }
+    .nav-item svg { flex: none; width: 1rem; height: 1rem; color: #303134; }
+    .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .sidebar-collapsed .nav-item { justify-content: center; }
+    .sidebar-collapsed .nav-label { display: none; }
+    .icon-15 svg { display: block; width: 15px; height: 15px; }
+    .stat-icon svg { display: block; width: 1rem; height: 1rem; }
+
+    /* Chat widget: direct port of the BNPL frontend widget, scoped so it does
+       not leak styles into the merchant dashboard. */
+    #chat-panel {
+      position: fixed;
+      right: 1.5rem;
+      bottom: 6rem;
+      z-index: 50;
+      display: none;
+      width: 400px;
+      height: min(640px, calc(100dvh - 7.5rem));
+      max-width: calc(100vw - 3rem);
+      overflow: hidden;
+      border: 1px solid #E6E7E8;
+      border-radius: 1rem;
+      background: #FFFFFF;
+      color: #303134;
+      box-shadow: 0 12px 16px 0 rgba(0, 0, 0, 0.08), 0 4px 56px 0 rgba(0, 0, 0, 0.08);
+    }
+    #chat-panel.chat-visible { display: flex; }
+    .chat-shell { display: flex; width: 100%; min-width: 0; flex-direction: column; }
+    .chat-header {
+      display: flex;
+      height: 3.5rem;
+      flex: none;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #E6E7E8;
+      padding: 0 1rem;
+    }
+    .chat-heading { display: flex; min-width: 0; align-items: center; gap: 0.625rem; }
+    .chat-live-dot { position: relative; display: flex; width: 0.5rem; height: 0.5rem; flex: none; }
+    .chat-live-dot::before {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 9999px;
+      background: #25B277;
+      opacity: 0.6;
+      animation: chat-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+      content: '';
+    }
+    .chat-live-dot::after {
+      position: relative;
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 9999px;
+      background: #25B277;
+      content: '';
+    }
+    @keyframes chat-ping { 75%, 100% { transform: scale(2); opacity: 0; } }
+    .chat-title { overflow: hidden; color: #181919; font-size: 0.875rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-identity {
+      max-width: 10rem;
+      overflow: hidden;
+      border-radius: 9999px;
+      background: #F2F2F2;
+      padding: 0.125rem 0.5rem;
+      color: #61646B;
+      font-size: 0.75rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chat-icon-button {
+      display: inline-flex;
+      width: 2.25rem;
+      height: 2.25rem;
+      flex: none;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 0.5rem;
+      background: transparent;
+      color: #61646B;
+      cursor: pointer;
+      transition: background-color 150ms, color 150ms, opacity 150ms;
+    }
+    .chat-icon-button:hover:not(:disabled) { background: #F2F2F2; color: #181919; }
+    .chat-icon-button:disabled { cursor: not-allowed; opacity: 0.4; }
+    .chat-icon-button svg { width: 1.125rem; height: 1.125rem; }
+    .chat-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 1.5rem 1rem; scrollbar-color: #D2D1D4 transparent; scrollbar-width: thin; }
+    .chat-message-list { display: flex; min-height: 100%; flex-direction: column; gap: 2rem; }
+    .chat-empty { display: flex; min-height: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 1.5rem; text-align: center; }
+    .chat-empty h2 { margin: 0 0 0.5rem; color: #181919; font-size: 1.5rem; font-weight: 500; letter-spacing: -0.025em; }
+    .chat-empty p { margin: 0; color: #94979E; font-size: 0.875rem; }
+    .chat-suggestions { display: flex; max-width: 25rem; flex-wrap: wrap; justify-content: center; gap: 0.5rem; }
+    .chat-suggestion {
+      border: 1px solid #E6E7E8;
+      border-radius: 9999px;
+      background: transparent;
+      padding: 0.375rem 0.875rem;
+      color: #61646B;
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: background-color 150ms, border-color 150ms, color 150ms;
+    }
+    .chat-suggestion:hover { border-color: #181919; background: #FFF9A8; color: #181919; }
+    .chat-user-row { display: flex; width: 100%; justify-content: flex-end; }
+    .chat-user-content { display: flex; max-width: 75%; flex-direction: column; align-items: flex-end; gap: 0.5rem; }
+    .chat-user-bubble {
+      border: 1px solid #FFE165;
+      border-radius: 1rem;
+      background: #FFF9A8;
+      padding: 0.625rem 1rem;
+      color: #181919;
+      font-size: 0.9375rem;
+      line-height: 1.75rem;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      box-shadow: none;
+    }
+    .chat-sent-image { max-width: 100%; max-height: 16rem; border-radius: 1rem; object-fit: cover; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); }
+    .chat-assistant { width: 100%; color: #303134; }
+    .chat-cursor { display: inline-block; width: 0.375rem; height: 1rem; margin-left: 0.125rem; transform: translateY(0.125rem); border-radius: 0.125rem; background: #181919; animation: chat-pulse 1.3s ease-in-out infinite; }
+    @keyframes chat-pulse { 50% { opacity: 0.3; } }
+    .chat-typing { display: flex; align-items: center; gap: 0.25rem; padding: 0.5rem 0; }
+    .chat-typing span { width: 0.5rem; height: 0.5rem; border-radius: 9999px; background: #94979E; animation: chat-bounce 1s infinite; }
+    .chat-typing span:nth-child(2) { animation-delay: 150ms; }
+    .chat-typing span:nth-child(3) { animation-delay: 300ms; }
+    @keyframes chat-bounce { 0%, 100% { transform: translateY(-20%); } 50% { transform: translateY(35%); } }
+    .chat-error { margin-top: 0.25rem; color: #E0291F; font-size: 0.75rem; }
+    .chat-activity { margin-bottom: 0.75rem; color: #94979E; font-size: 0.875rem; }
+    .chat-activity summary { display: flex; width: fit-content; align-items: center; gap: 0.25rem; border-radius: 0.25rem; cursor: pointer; list-style: none; transition: color 150ms; }
+    .chat-activity summary::-webkit-details-marker { display: none; }
+    .chat-activity summary:hover { color: #61646B; }
+    .chat-activity-chevron { width: 0.875rem; height: 0.875rem; transition: transform 200ms; }
+    .chat-activity[open] .chat-activity-chevron { transform: rotate(180deg); }
+    .chat-shimmer {
+      background: linear-gradient(100deg, #94979E 40%, #181919 50%, #94979E 60%);
+      background-size: 200% auto;
+      background-clip: text;
+      -webkit-background-clip: text;
+      color: transparent;
+      animation: chat-shimmer 2s linear infinite;
+    }
+    @keyframes chat-shimmer { from { background-position: 150% center; } to { background-position: -50% center; } }
+    .chat-activity-list { margin: 0.5rem 0 0 0.5625rem; padding: 0; border-left: 1px solid #F2F2F2; list-style: none; }
+    .chat-activity-row { position: relative; display: flex; align-items: center; gap: 0.625rem; padding: 0.25rem 0 0.25rem 1.25rem; color: #94979E; }
+    .chat-activity-row svg { position: absolute; left: -0.5625rem; width: 1.125rem; height: 1.125rem; padding: 0.125rem; border-radius: 9999px; background: #FFFFFF; }
+    .chat-choice { max-width: 24rem; margin-bottom: 0.75rem; }
+    .chat-choice-prompt { margin: 0 0 0.5rem; color: #303134; font-size: 0.9375rem; line-height: 1.75rem; }
+    .chat-choice-options { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .chat-choice-option {
+      border: 1px solid #E6E7E8;
+      border-radius: 0.75rem;
+      background: transparent;
+      padding: 0.5rem 0.875rem;
+      color: #303134;
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: background-color 150ms, border-color 150ms, color 150ms;
+    }
+    .chat-choice-option:hover:not(:disabled) { border-color: #181919; background: #FFF9A8; color: #181919; }
+    .chat-choice-option:disabled { cursor: not-allowed; opacity: 0.5; }
+    .chat-choice-settled { display: flex; align-items: center; gap: 0.5rem; border: 1px solid #F2F2F2; border-radius: 0.75rem; background: #FAFAFA; padding: 0.5rem 0.875rem; color: #61646B; font-size: 0.875rem; }
+    .chat-choice-check { color: #181919; }
+    .chat-markdown { min-width: 0; color: #303134; }
+    .chat-markdown p { margin: 1rem 0; font-size: 0.9375rem; line-height: 1.75rem; }
+    .chat-markdown p:first-child { margin-top: 0; }
+    .chat-markdown p:last-child { margin-bottom: 0; }
+    .chat-markdown h1, .chat-markdown h2, .chat-markdown h3, .chat-markdown h4 { margin: 1.5rem 0 0.75rem; color: #181919; font-weight: 600; letter-spacing: -0.025em; }
+    .chat-markdown h1 { font-size: 1.5rem; }
+    .chat-markdown h2 { font-size: 1.25rem; }
+    .chat-markdown h3 { font-size: 1.125rem; }
+    .chat-markdown h4 { font-size: 1rem; }
+    .chat-markdown ul, .chat-markdown ol { margin: 1rem 0; padding-left: 1.5rem; font-size: 0.9375rem; line-height: 1.75rem; }
+    .chat-markdown ul { list-style: disc; }
+    .chat-markdown ol { list-style: decimal; }
+    .chat-markdown a { color: #181919; text-decoration: underline; text-decoration-color: #303134; text-underline-offset: 0.25rem; }
+    .chat-markdown blockquote { margin: 1rem 0; border-left: 2px solid #D2D1D4; padding-left: 1rem; color: #61646B; font-style: italic; }
+    .chat-markdown hr { margin: 1.5rem 0; border: 0; border-top: 1px solid #F2F2F2; }
+    .chat-markdown code:not(pre code) { border-radius: 0.25rem; background: #F2F2F2; padding: 0.125rem 0.375rem; color: #181919; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; }
+    .chat-markdown table { width: 100%; margin: 1rem 0; border-collapse: collapse; font-size: 0.875rem; }
+    .chat-markdown th, .chat-markdown td { border: 1px solid #F2F2F2; padding: 0.5rem 0.75rem; text-align: left; }
+    .chat-markdown th { background: #FAFAFA; color: #303134; }
+    .chat-code-block { margin: 1rem 0; overflow: hidden; border: 1px solid #E6E7E8; border-radius: 0.5rem; background: #FAFAFA; }
+    .chat-code-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #F2F2F2; background: #F2F2F2; padding: 0.375rem 0.75rem; }
+    .chat-code-language { color: #94979E; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+    .chat-copy-code { border: 0; background: transparent; color: #94979E; font-size: 0.75rem; cursor: pointer; }
+    .chat-copy-code:hover { color: #303134; }
+    .chat-code-block pre { margin: 0; overflow-x: auto; padding: 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; line-height: 1.6; }
+    .chat-composer-wrap { flex: none; padding: 0 1rem 1.5rem; }
+    .chat-composer { border: 1px solid #E6E7E8; border-radius: 1rem; background: #FFFFFF; padding: 0.5rem; transition: border-color 150ms; }
+    .chat-composer:focus-within { border-color: #181919; }
+    .chat-previews { display: none; flex-wrap: wrap; gap: 0.5rem; padding: 0.25rem 0.25rem 0.5rem; }
+    .chat-previews.has-images { display: flex; }
+    .chat-preview { position: relative; }
+    .chat-preview img { width: 3.5rem; height: 3.5rem; border-radius: 0.5rem; object-fit: cover; }
+    .chat-remove-image { position: absolute; top: -0.375rem; right: -0.375rem; display: flex; width: 1.25rem; height: 1.25rem; align-items: center; justify-content: center; border: 1px solid #E6E7E8; border-radius: 9999px; background: #F2F2F2; color: #61646B; cursor: pointer; }
+    .chat-attachment-error { display: none; padding: 0 0.25rem 0.375rem; color: #E0291F; font-size: 0.75rem; }
+    .chat-composer-row { display: flex; align-items: flex-end; gap: 0.5rem; }
+    #chat-input { min-height: 2.25rem; max-height: 11rem; flex: 1; resize: none; border: 0; outline: 0; background: transparent; padding: 0.375rem 0.5rem; color: #181919; font: inherit; font-size: 0.875rem; line-height: 1.5rem; }
+    #chat-input::placeholder { color: #94979E; }
+    .chat-send { background: #181919; color: white; }
+    .chat-send:hover:not(:disabled) { background: #303134; }
+    .chat-stop { display: none; background: #F2F2F2; color: #303134; }
+    #chat-launcher:focus-visible, .chat-icon-button:focus-visible, .chat-suggestion:focus-visible, .chat-copy-code:focus-visible { outline: 2px solid #181919; outline-offset: 2px; }
+    @media (max-width: 520px) {
+      #chat-panel { right: 0.75rem; bottom: 5.25rem; width: calc(100vw - 1.5rem); height: calc(100dvh - 6rem); max-width: none; }
+      #chat-launcher { right: 0.75rem !important; bottom: 0.75rem !important; }
+      .chat-identity { max-width: 7rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .chat-live-dot::before, .chat-shimmer, .chat-cursor, .chat-typing span { animation: none; }
+      .chat-shimmer { background: none; color: #61646B; }
+    }
+  </style>
+</head>
+<body class="bg-white text-cashea-gray-15 min-h-screen">
+
+<!-- ── App Root ──────────────────────────────────────────────────── -->
+<div id="app"></div>
+
+<!-- ── Chat Widget (inline, same behavior as the BNPL frontend) ───── -->
+<div id="chat-panel" aria-hidden="true">
+  <section class="chat-shell" role="dialog" aria-label="Soporte al aliado">
+    <header class="chat-header">
+      <div class="chat-heading">
+        <span class="chat-live-dot" aria-hidden="true"></span>
+        <span class="chat-title">Soporte al Aliado</span>
+        <span id="chat-identity" class="chat-identity">Invitado</span>
+      </div>
+      <button id="chat-new" type="button" class="chat-icon-button" aria-label="Nueva conversación" title="Nueva conversación">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+      </button>
+    </header>
+    <div id="chat-messages" class="chat-messages"></div>
+    <div class="chat-composer-wrap">
+      <div class="chat-composer">
+        <div id="chat-previews" class="chat-previews"></div>
+        <p id="chat-attachment-error" class="chat-attachment-error"></p>
+        <div class="chat-composer-row">
+          <input id="chat-files" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden />
+          <button id="chat-attach" type="button" class="chat-icon-button" aria-label="Adjuntar imágenes">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <textarea id="chat-input" rows="1" placeholder="Escribe un mensaje…"></textarea>
+          <button id="chat-send" type="button" class="chat-icon-button chat-send" aria-label="Enviar mensaje" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+          </button>
+          <button id="chat-stop" type="button" class="chat-icon-button chat-stop" aria-label="Detener respuesta">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect width="12" height="12" x="6" y="6" rx="1"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+<button id="chat-launcher" onclick="toggleChat()" aria-label="Abrir soporte al aliado" aria-expanded="false"
+  class="fixed right-6 bottom-6 z-50 flex items-center justify-center transition-all hover:scale-105"
+  style="width:56px; height:56px; border-radius:50%; background:#FFDE54; box-shadow:0 8px 20px rgba(0,0,0,0.15); cursor:pointer; border:none;">
+  <svg id="chat-icon-open" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#181919" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+  </svg>
+  <svg id="chat-icon-close" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;" aria-hidden="true">
+    <line x1="18" y1="6" x2="6" y2="18"/>
+    <line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+</button>
+
+<script>
+// ════════════════════════════════════════════════════════════════════
+// State
+// ════════════════════════════════════════════════════════════════════
+const API = '/api/v1';
+let selectedMerchant = null;
+let currentView = 'resumen';
+let currentStoreUuid = null;
+
+// ════════════════════════════════════════════════════════════════════
+// API helpers
+// ════════════════════════════════════════════════════════════════════
+async function api(path) {
+  const res = await fetch(`${API}${path}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw Object.assign(new Error(body.error || 'Error'), { status: res.status, body });
+  }
+  return res.json();
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Formatters
+// ════════════════════════════════════════════════════════════════════
+const fmtMoney = (cents) => '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtMoneyVES = (cents) => 'Bs ' + (cents / 100).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('es-VE', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString('es-VE', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+const fmtPeriod = (label) => label || '—';
+
+function badge(text, color) {
+  const colors = {
+    green: 'bg-cashea-green-12 text-cashea-green-14 border-cashea-green-15',
+    yellow: 'bg-cashea-yellow-11 text-cashea-gray-2 border-cashea-yellow-4',
+    red: 'bg-cashea-red-12 text-cashea-red-13 border-cashea-red-11',
+    dark: 'bg-cashea-gray-15 text-white border-cashea-gray-15',
+    gray: 'bg-cashea-gray-13 text-cashea-gray-2 border-cashea-gray-22',
+    brand: 'bg-cashea-yellow-3 text-cashea-gray-15 border-cashea-yellow-3',
+  };
+  return `<span class="px-2 py-0.5 rounded text-xs font-semibold border ${colors[color] || colors.gray}">${text}</span>`;
+}
+
+function statusBadge(status) {
+  const map = {
+    ACTIVE: ['ACTIVE', 'green'], INACTIVE: ['INACTIVE', 'gray'], SUSPENDED: ['SUSPENDED', 'red'],
+    SENT: ['SENT', 'green'], PENDING: ['PENDING', 'yellow'], FAILED: ['FAILED', 'red'],
+    ISSUED: ['ISSUED', 'dark'], NOT_SENT: ['NOT_SENT', 'red'],
+    JOINED: ['JOINED', 'green'], AVAILABLE: ['AVAILABLE', 'dark'], NONE: ['—', 'gray'],
+    COMPLETED: ['Done', 'green'], 'in-progress': ['In Progress', 'yellow'], pending: ['Pending', 'gray'],
+    FINISHED: ['FINISHED', 'green'], IN_PROGRESS: ['IN PROGRESS', 'yellow'], IN_PROGRESS_RTG: ['RTG', 'dark'],
+    CLOSED: ['CLOSED', 'green'], OPEN: ['OPEN', 'dark'], CANCELLED: ['CANCELLED', 'red'],
+  };
+  const [text, color] = map[status] || [status, 'gray'];
+  return badge(text, color);
+}
+
+function spinner() {
+  return '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
+}
+
+/** Error text comes from the server, so it is escaped before hitting innerHTML. */
+function escapeHtml(value) {
+  const el = document.createElement('span');
+  el.textContent = value;
+  return el.innerHTML;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Router
+// ════════════════════════════════════════════════════════════════════
+function navigate(view) {
+  currentView = view;
+  if (selectedMerchant) renderApp();
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Merchant Selector (landing)
+// ════════════════════════════════════════════════════════════════════
+async function renderSelector() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="min-h-screen flex items-center justify-center px-4 py-10">
+      <div class="max-w-3xl w-full">
+        <div class="flex flex-col items-center mb-8">
+          <img src="/assets/cashea_logo.svg" alt="Cashea" class="h-8 mb-6" />
+          <h1 class="text-2xl font-bold text-cashea-gray-15">Portal del Aliado</h1>
+          <p class="text-cashea-gray-17 text-sm mt-2">Selecciona un comercio para navegar sus datos (mock)</p>
+        </div>
+        <div class="relative mb-6">
+          <input id="search" type="text" placeholder="Buscar por RIF o razón social..."
+            class="w-full px-4 py-3 bg-white border border-cashea-gray-18 rounded-2xl text-sm text-cashea-gray-15 placeholder-cashea-gray-16 focus:outline-none focus:border-cashea-gray-15"
+            oninput="debounceSearch()" autofocus />
+        </div>
+        <div id="merchant-list" class="grid gap-3">${spinner()}</div>
+      </div>
+    </div>
+  `;
+  await loadMerchants('');
+}
+
+async function loadMerchants(query) {
+  const listEl = document.getElementById('merchant-list');
+  if (!listEl) return;
+  listEl.innerHTML = spinner();
+  const q = query ? `?search=${encodeURIComponent(query)}&limit=20` : '?limit=20';
+  const res = await api(`/merchants${q}`);
+  if (!res.data || res.data.length === 0) {
+    listEl.innerHTML = '<p class="text-center text-cashea-gray-16 py-8">No se encontraron comercios</p>';
+    return;
+  }
+  listEl.innerHTML = res.data.map(m => `
+    <div class="bg-white hover:bg-cashea-gray-13 border border-cashea-gray-18 rounded-2xl p-4 cursor-pointer transition-all hover:border-cashea-gray-15"
+         onclick="selectMerchant(${m.id})">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="font-semibold text-cashea-gray-15">${m.legalName}</div>
+          <div class="text-sm text-cashea-gray-17">${m.tradeName || ''} · ${m.rif}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          ${badge(m.model, m.model === 'EXPRESS' ? 'brand' : 'dark')}
+          ${statusBadge(m.status)}
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+let searchTimer;
+function debounceSearch() {
+  clearTimeout(searchTimer);
+  const q = document.getElementById('search').value;
+  searchTimer = setTimeout(() => loadMerchants(q), 300);
+}
+
+async function selectMerchant(id) {
+  try {
+    selectedMerchant = await api(`/merchants/${id}`);
+    renderApp();
+    updateChatContext();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Icons — SVG paths lifted from merchant-web/src/assets/v2/icons so the
+// sidebar reads like the real portal. Strokes switched to currentColor so
+// the active nav state can recolor them.
+// ════════════════════════════════════════════════════════════════════
+const ICONS = {
+  chart: '<svg viewBox="0 0 15 16" fill="none"><path d="M0.5 15H0V15.5H0.5V15ZM6.5 6L6.9 5.7C6.80264 5.57018 6.64833 5.49569 6.48613 5.50019C6.32392 5.50469 6.17399 5.58763 6.08397 5.72265L6.5 6ZM9.5 10L9.1 10.3C9.19566 10.4275 9.3464 10.5018 9.50581 10.5C9.66523 10.4981 9.8142 10.4203 9.90687 10.2906L9.5 10ZM0.5 0.5H0V15H0.5H1V0.5H0.5ZM0.5 15V15.5H15V15V14.5H0.5V15ZM2.5 12L2.91603 12.2774L6.91603 6.27735L6.5 6L6.08397 5.72265L2.08397 11.7226L2.5 12ZM6.5 6L6.1 6.3L9.1 10.3L9.5 10L9.9 9.7L6.9 5.7L6.5 6ZM9.5 10L9.90687 10.2906L14.9069 3.29062L14.5 3L14.0931 2.70938L9.09313 9.70938L9.5 10Z" fill="currentColor"/></svg>',
+  receipt: '<svg viewBox="0 0 15 16" fill="none"><path d="M4 5H6M8 5H11M4 8H6M8 8H11M8 11H11M1.5 1H13.5V15L11.5 14L9.5 15L7.5 14L5.5 15L3.5 14L1.5 15V1Z" stroke="currentColor" stroke-linejoin="round"/></svg>',
+  cashClosing: '<svg viewBox="0 0 18 18" fill="none"><path d="M12.5 10.5H5.5C3.86039 10.5 3.04057 10.5 2.45945 10.9069C2.24446 11.0575 2.05745 11.2444 1.90691 11.4595C1.5 12.0406 1.5 12.8604 1.5 14.5C1.5 15.3198 1.5 15.7297 1.70345 16.0203C1.77873 16.1278 1.87223 16.2213 1.97972 16.2965C2.27029 16.5 2.68019 16.5 3.5 16.5H14.5C15.3198 16.5 15.7297 16.5 16.0203 16.2965C16.1278 16.2213 16.2213 16.1278 16.2965 16.0203C16.5 15.7297 16.5 15.3198 16.5 14.5C16.5 12.8604 16.5 12.0406 16.0931 11.4595C15.9425 11.2444 15.7555 11.0575 15.5405 10.9069C14.9594 10.5 14.1396 10.5 12.5 10.5Z" stroke="currentColor" stroke-linecap="round"/><path d="M15 10.5L14.6948 7.75305C14.4833 5.84897 14.3774 4.89692 13.7367 4.32346C13.096 3.75 12.1381 3.75 10.2223 3.75H7.77773C5.86189 3.75 4.90398 3.75 4.26327 4.32346C3.62257 4.89692 3.51678 5.84897 3.30521 7.75305L3 10.5" stroke="currentColor" stroke-linecap="round"/><path d="M8.625 1.5H10.5M10.5 1.5H12.375M10.5 1.5V3.75" stroke="currentColor" stroke-linecap="round"/><path d="M6.75 13.125L7.49711 13.6231C7.74353 13.7873 8.03303 13.875 8.3292 13.875H9.6708C9.96697 13.875 10.2565 13.7873 10.5029 13.6231L11.25 13.125" stroke="currentColor" stroke-linecap="round"/><path d="M6 6H7.5" stroke="currentColor" stroke-linecap="round"/></svg>',
+  movements: '<svg viewBox="0 0 16 16" fill="none"><path d="M10.1333 8.53334L12.928 11.7333L10.1333 14.9333M12.928 11.7333L2.13333 11.7333" stroke="currentColor"/><path d="M5.33334 7.73334L2.13334 4.53334L5.33334 1.06667M2.13334 4.53334L13.3333 4.53334" stroke="currentColor"/></svg>',
+  box: '<svg viewBox="0 0 19 20" fill="none"><path d="M9.5 17.9165C8.85226 17.9165 8.23349 17.6551 6.9959 17.1324C3.9153 15.831 2.375 15.1803 2.375 14.0859C2.375 13.7794 2.375 8.46757 2.375 6.0415M9.5 17.9165C10.1477 17.9165 10.7665 17.6551 12.0041 17.1324C15.0847 15.831 16.625 15.1803 16.625 14.0859V6.0415M9.5 17.9165V9.48905" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.59135 8.17251L4.27874 7.05346C3.00958 6.43933 2.375 6.13226 2.375 5.646C2.375 5.15973 3.00958 4.85267 4.27874 4.23853L6.59135 3.11949C8.01863 2.42883 8.73232 2.0835 9.5 2.0835C10.2677 2.0835 10.9814 2.42882 12.4087 3.11949L14.7213 4.23853C15.9904 4.85267 16.625 5.15973 16.625 5.646C16.625 6.13226 15.9904 6.43933 14.7213 7.05346L12.4087 8.17251C10.9814 8.86317 10.2677 9.2085 9.5 9.2085C8.73232 9.2085 8.01863 8.86317 6.59135 8.17251Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.75 10L6.33333 10.7917" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.4596 3.6665L5.54297 7.62484" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  lifebuoy: '<svg viewBox="0 0 15 15" fill="none"><path d="M10.3284 10.3284C8.7663 11.8905 6.23364 11.8905 4.67154 10.3284M10.3284 10.3284C11.8905 8.76633 11.8905 6.23367 10.3284 4.67157M10.3284 10.3284L12.4497 12.4497M4.67154 10.3284C3.10945 8.76633 3.10945 6.23367 4.67154 4.67157M4.67154 10.3284L2.55025 12.4497M10.3284 4.67157C8.7663 3.10948 6.23364 3.10948 4.67154 4.67157M10.3284 4.67157L12.4497 2.55025M4.67154 4.67157L2.55025 2.55025M12.4497 12.4497C9.71608 15.1834 5.28392 15.1834 2.55025 12.4497M12.4497 12.4497C15.1834 9.71608 15.1834 5.28392 12.4497 2.55025M2.55025 12.4497C-0.183417 9.71608 -0.183417 5.28392 2.55025 2.55025M12.4497 2.55025C9.71608 -0.183417 5.28392 -0.183418 2.55025 2.55025" stroke="currentColor"/></svg>',
+  store: '<svg viewBox="0 0 24 24" fill="none"><path d="M2.4 4.00005V3.33338C2.08221 3.33338 1.8086 3.55769 1.74628 3.8693L2.4 4.00005ZM21.6 4.00005L22.2537 3.8693C22.1914 3.55769 21.9178 3.33338 21.6 3.33338V4.00005ZM23.2 12V12.6667C23.3997 12.6667 23.5889 12.5772 23.7156 12.4227C23.8422 12.2682 23.8929 12.0652 23.8537 11.8693L23.2 12ZM0.8 12L0.14628 11.8693C0.10711 12.0652 0.157813 12.2682 0.284439 12.4227C0.411064 12.5772 0.600271 12.6667 0.8 12.6667V12ZM5.6 16.8H4.93333V17.4667H5.6V16.8ZM18.4 16.8V17.4667H19.0667V16.8H18.4ZM0 23.2V23.8667H24V23.2V22.5334H0V23.2ZM2.4 12H1.73333V23.2H2.4H3.06667V12H2.4ZM21.6 12H20.9333V23.2H21.6H22.2667V12H21.6ZM2.4 4.00005V4.66672H21.6V4.00005V3.33338H2.4V4.00005ZM21.6 4.00005L20.9463 4.13079L22.5463 12.1308L23.2 12L23.8537 11.8693L22.2537 3.8693L21.6 4.00005ZM23.2 12V11.3334H0.8V12V12.6667H23.2V12ZM0.8 12L1.45372 12.1308L3.05372 4.13079L2.4 4.00005L1.74628 3.8693L0.14628 11.8693L0.8 12ZM1.6 0.800049V1.46672H22.4V0.800049V0.133382H1.6V0.800049ZM5.6 12H4.93333V16.8H5.6H6.26667V12H5.6ZM5.6 16.8V17.4667H18.4V16.8V16.1334H5.6V16.8ZM18.4 16.8H19.0667V12H18.4H17.7333V16.8H18.4Z" fill="currentColor"/></svg>',
+  profile: '<svg viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M16.8 5.59686C16.8 8.24633 14.6512 10.3937 12 10.3937C9.3488 10.3937 7.2 8.24633 7.2 5.59686C7.2 2.94739 9.3488 0.799988 12 0.799988C14.6512 0.799988 16.8 2.94739 16.8 5.59686Z" stroke="currentColor" stroke-linecap="square"/><path fill-rule="evenodd" clip-rule="evenodd" d="M20 23.1854H4C4 22.0493 4 20.9685 4 19.9898C4 17.3388 6.14903 15.1906 8.8 15.1906H15.2C17.851 15.1906 20 17.3388 20 19.9898C20 20.9685 20 22.0493 20 23.1854Z" stroke="currentColor" stroke-linecap="square"/></svg>',
+  sidebarExpand: '<svg viewBox="0 0 16 16" fill="none"><path d="M11.5 13V3M1 4L1 12C1 12.5523 1.44772 13 2 13L14 13C14.5523 13 15 12.5523 15 12V4C15 3.44772 14.5523 3 14 3L2 3C1.44772 3 1 3.44772 1 4Z" stroke="currentColor"/><path d="M5 11L7.62 8L5 5" stroke="currentColor"/></svg>',
+  // Not in merchant-web's icon set (they come from the private @cashea-bnpl/web-icons
+  // package), so these two are stroke-matched approximations.
+  invoice: '<svg viewBox="0 0 16 16" fill="none"><path d="M3 1.5H10L13 4.5V14.5H3V1.5Z" stroke="currentColor" stroke-linejoin="round"/><path d="M9.5 1.5V5H13" stroke="currentColor" stroke-linejoin="round"/><path d="M5.5 8H10.5M5.5 10.5H10.5" stroke="currentColor" stroke-linecap="round"/></svg>',
+  heart: '<svg viewBox="0 0 16 16" fill="none"><path d="M8 13.5C8 13.5 1.5 9.75 1.5 5.75C1.5 3.95 2.95 2.5 4.75 2.5C6 2.5 7.35 3.15 8 4.5C8.65 3.15 10 2.5 11.25 2.5C13.05 2.5 14.5 3.95 14.5 5.75C14.5 9.75 8 13.5 8 13.5Z" stroke="currentColor" stroke-linejoin="round"/></svg>',
+};
+
+// ════════════════════════════════════════════════════════════════════
+// Main App Layout — mirrors merchant-web's AppLayout + v2/Sidebar:
+// collapsible sidebar on the left, content column scrolling on its own.
+// ════════════════════════════════════════════════════════════════════
+const SIDEBAR_STORAGE_KEY = 'mock-sidebar-expanded';
+let sidebarOpen = localStorage.getItem(SIDEBAR_STORAGE_KEY) !== 'false';
+
+function toggleSidebar() {
+  sidebarOpen = !sidebarOpen;
+  localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarOpen));
+  renderApp();
+}
+
+function renderApp() {
+  const m = selectedMerchant;
+  const app = document.getElementById('app');
+  const sections = [
+    ['resumen', 'Resumen', 'chart'],
+    ['orders', 'Órdenes', 'receipt'],
+    ['conciliation', 'Cierre de caja', 'cashClosing'],
+    ['monthly', 'Reporte mensual', 'chart'],
+    ['payouts', 'Transferencias', 'movements'],
+    ['invoices', 'Facturas', 'invoice'],
+    ['employees', 'Empleados', 'profile'],
+    ['promotions', 'Creo en ti', 'heart'],
+    ['stores', 'Tiendas', 'store'],
+    ['scenarios', 'Escenarios', 'box'],
+  ];
+
+  const navItems = sections.map(([key, label, icon]) => `
+    <a href="#${key}" onclick="navigate('${key}')" title="${label}"
+       class="nav-item ${currentView === key ? 'active' : ''}">
+      ${ICONS[icon]}
+      <span class="nav-label">${label}</span>
+    </a>
+  `).join('');
+
+  app.innerHTML = `
+    <div class="h-screen flex relative">
+      <!-- Sidebar -->
+      <div id="sidebar" class="shrink-0 ${sidebarOpen ? '' : 'sidebar-collapsed'}">
+        <div class="h-screen py-6 bg-cashea-smoke-white flex flex-col shadow-sidebar overflow-hidden transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-[220px] px-4 items-stretch' : 'w-[94px] px-3 items-center'}">
+          <div class="w-full flex ${sidebarOpen ? 'justify-start' : 'justify-center'}">
+            <button onclick="toggleSidebar()" class="p-1 rounded cursor-pointer text-cashea-gray-14"
+                    aria-label="${sidebarOpen ? 'Colapsar menú' : 'Expandir menú'}">
+              <span class="icon-15 block ${sidebarOpen ? 'rotate-180' : ''}">${ICONS.sidebarExpand}</span>
+            </button>
+          </div>
+
+          <a href="#resumen" onclick="navigate('resumen')" class="mt-8 h-8 flex items-center ${sidebarOpen ? 'justify-start' : 'justify-center'}">
+            <img src="${sidebarOpen ? '/assets/cashea_logo.svg' : '/assets/logomark.svg'}"
+                 alt="Cashea" class="${sidebarOpen ? 'h-8' : 'w-8'}" />
+          </a>
+
+          <div class="mt-6 flex flex-col flex-1 gap-1 overflow-y-auto">${navItems}</div>
+
+          <div class="w-full mt-4 pt-3">
+            <div class="py-3 w-full border-t border-b border-cashea-gray-18">
+              <div class="nav-item" title="Ayuda">${ICONS.lifebuoy}<span class="nav-label">Ayuda</span></div>
+            </div>
+            <button onclick="logout()" type="button" title="Cambiar comercio"
+                    class="mt-3 nav-item w-full text-left">
+              ${ICONS.profile}
+              <span class="nav-label flex flex-col min-w-0">
+                <span class="text-sm font-semibold text-cashea-gray-15 truncate">${m.legalName}</span>
+                <span class="text-xs font-normal text-cashea-gray-17 truncate">Cambiar comercio</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="flex-1 overflow-y-auto min-w-0">
+        <div class="px-6 md:px-10 pt-8 md:pt-10 pb-10">
+          <div class="flex flex-wrap items-center gap-3 mb-8">
+            <h1 class="text-2xl font-bold text-cashea-gray-15">${m.legalName}</h1>
+            <span class="text-sm text-cashea-gray-17">${m.rif}</span>
+            ${badge(m.model, m.model === 'EXPRESS' ? 'brand' : 'dark')}
+            ${statusBadge(m.status)}
+          </div>
+          <div id="content">${spinner()}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Render current view
+  const views = {
+    resumen: viewResumen,
+    orders: viewOrders,
+    conciliation: viewConciliation,
+    monthly: viewMonthly,
+    payouts: viewPayouts,
+    invoices: viewInvoices,
+    employees: viewEmployees,
+    promotions: viewPromotions,
+    stores: viewStores,
+    scenarios: viewScenarios,
+  };
+  // No view function guards its own fetches, so a non-2xx or a dropped
+  // connection would leave #content spinning forever with nothing to explain
+  // it. Catching here covers all ten views from one place.
+  Promise.resolve((views[currentView] || viewResumen)()).catch((error) => {
+    const content = document.getElementById('content');
+    if (!content) return;
+    content.innerHTML = `
+      <div class="bg-white border border-cashea-red-11 rounded-2xl p-4">
+        <p class="font-semibold text-cashea-red-13">No se pudo cargar esta vista</p>
+        <p class="text-sm text-cashea-gray-17 mt-1">${escapeHtml(error?.message || String(error))}</p>
+        <button onclick="renderApp()" class="mt-3 text-sm font-semibold text-cashea-gray-15 underline underline-offset-2">Reintentar</button>
+      </div>
+    `;
+  });
+}
+
+function logout() {
+  selectedMerchant = null;
+  currentView = 'resumen';
+  renderSelector();
+  updateChatContext();
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Views
+// ════════════════════════════════════════════════════════════════════
+
+// ── Resumen ────────────────────────────────────────────────────────
+async function viewResumen() {
+  const c = document.getElementById('content');
+  const m = selectedMerchant;
+  c.innerHTML = spinner();
+
+  const [stores, ordersRes, payouts, invoices] = await Promise.all([
+    api(`/merchants/${m.id}/stores`),
+    api(`/orders?merchantId=${m.id}&limit=5`),
+    api(`/merchants/${m.id}/payouts`),
+    api(`/merchants/${m.id}/invoices`),
+  ]);
+
+  const pendingPayouts = (payouts.data || []).filter(p => p.status === 'PENDING').length;
+  const notSentInvoices = (invoices.data || []).filter(i => i.status === 'NOT_SENT').length;
+  const recentOrders = ordersRes.data || [];
+
+  c.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Resumen</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      ${statCard('Tiendas', (stores.data || []).length, 'store', 'neutral')}
+      ${statCard('Órdenes (total)', ordersRes.total || 0, 'receipt', 'neutral')}
+      ${statCard('Transferencias pendientes', pendingPayouts, 'movements', 'neutral')}
+      ${statCard('Facturas no enviadas', notSentInvoices, 'invoice', notSentInvoices > 0 ? 'red' : 'gray')}
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-4">
+      <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+        <h3 class="font-semibold mb-3 text-cashea-gray-2">Órdenes recientes</h3>
+        ${recentOrders.length === 0 ? '<p class="text-cashea-gray-16 text-sm">Sin órdenes</p>' : `
+        <table class="w-full text-sm">
+          <tbody>
+            ${recentOrders.map(o => `
+              <tr class="border-b border-cashea-gray-18 hover:bg-cashea-gray-13 cursor-pointer" onclick="navigate('orders')">
+                <td class="py-2 font-mono text-cashea-gray-15 underline decoration-cashea-gray-19 underline-offset-2">${o.orderNumber}</td>
+                <td class="py-2">${statusBadge(o.status)}</td>
+                <td class="py-2 text-right">${fmtMoney(o.totalAmount)}</td>
+                <td class="py-2 text-cashea-gray-17 text-xs">${fmtDate(o.createdAt)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>`}
+      </div>
+
+      <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+        <h3 class="font-semibold mb-3 text-cashea-gray-2">Datos del comercio</h3>
+        <dl class="text-sm space-y-1">
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">Razón social</dt><dd>${m.legalName}</dd></div>
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">Nombre comercial</dt><dd>${m.tradeName || '—'}</dd></div>
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">RIF</dt><dd class="font-mono">${m.rif}</dd></div>
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">Modelo</dt><dd>${badge(m.model, m.model === 'EXPRESS' ? 'brand' : 'dark')}</dd></div>
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">Grupo</dt><dd>${m.merchantGroup || '—'}</dd></div>
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">FCB Period</dt><dd>${m.fcbPeriod || '—'}</dd></div>
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">Admin email</dt><dd class="text-xs">${m.adminEmail}</dd></div>
+          ${m.scenarioTags && m.scenarioTags.length > 0 ? `<div class="pt-2"><span class="text-cashea-gray-17">Escenarios:</span> ${m.scenarioTags.map(t => badge(t, 'yellow')).join(' ')}</div>` : ''}
+        </dl>
+      </div>
+    </div>
+  `;
+}
+
+// `icon` is a key of ICONS (the merchant-web icon set), not an emoji.
+function statCard(label, value, icon, color) {
+  const valueColor = color === 'red' ? 'text-cashea-red-13' : 'text-cashea-gray-15';
+  return `
+    <div class="bg-white rounded-2xl p-4 border border-cashea-gray-18">
+      <div class="stat-icon mb-3 text-cashea-gray-17">${ICONS[icon] || ''}</div>
+      <div class="text-2xl font-bold ${valueColor}">${value}</div>
+      <div class="text-xs text-cashea-gray-17 mt-0.5">${label}</div>
+    </div>
+  `;
+}
+
+// ── Órdenes ────────────────────────────────────────────────────────
+let ordersPage = 1;
+let ordersFilter = '';
+
+async function viewOrders() {
+  const c = document.getElementById('content');
+  ordersPage = 1;
+  c.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-bold">Órdenes</h2>
+      <div class="flex gap-2">
+        <select id="order-status" onchange="ordersPage = 1; reloadOrders()" class="bg-white border border-cashea-gray-18 rounded px-2 py-1 text-sm">
+          <option value="">Todos los estados</option>
+          <option value="CLOSED">CLOSED</option>
+          <option value="OPEN">OPEN</option>
+          <option value="IN_PROGRESS">IN_PROGRESS</option>
+          <option value="CANCELLED">CANCELLED</option>
+          <option value="PENDING">PENDING</option>
+        </select>
+      </div>
+    </div>
+    <div id="orders-table">${spinner()}</div>
+  `;
+  await reloadOrders();
+}
+
+async function reloadOrders() {
+  const statusSel = document.getElementById('order-status');
+  const status = statusSel ? statusSel.value : '';
+  const tableEl = document.getElementById('orders-table');
+  if (!tableEl) return;
+  tableEl.innerHTML = spinner();
+
+  const q = `?merchantId=${selectedMerchant.id}&page=${ordersPage}&limit=15${status ? `&status=${status}` : ''}`;
+  const res = await api(`/orders${q}`);
+  const orders = res.data || [];
+
+  tableEl.innerHTML = `
+    ${orders.length === 0 ? '<p class="text-cashea-gray-16 py-8 text-center">Sin órdenes</p>' : `
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-cashea-gray-17 border-b border-cashea-gray-18">
+          <th class="py-2">Orden</th>
+          <th>Estado</th>
+          <th>Canal</th>
+          <th>Comprador</th>
+          <th class="text-right">Total</th>
+          <th class="text-right">Inicial</th>
+          <th>Financiado</th>
+          <th>Fecha</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${orders.map(o => `
+          <tr class="border-b border-cashea-gray-18 hover:bg-white cursor-pointer" onclick="showOrderDetail('${o.orderNumber}')">
+            <td class="py-2 font-mono text-cashea-gray-15 underline decoration-cashea-gray-19 underline-offset-2">${o.orderNumber}</td>
+            <td>${statusBadge(o.status)}</td>
+            <td><span class="text-xs text-cashea-gray-17">${o.channel || '—'}</span></td>
+            <td class="text-xs">${o.buyer ? o.buyer.fullName : '—'}</td>
+            <td class="text-right font-semibold">${fmtMoney(o.totalAmount)}</td>
+            <td class="text-right text-cashea-green-14 text-xs">${fmtMoney(o.downPaymentAmount)}</td>
+            <td class="text-right text-cashea-gray-17 text-xs">${fmtMoney(o.financedAmount)}</td>
+            <td class="text-xs text-cashea-gray-17">${fmtDate(o.createdAt)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>`}
+    ${res.totalPages > 1 ? `
+      <div class="flex items-center justify-between mt-4">
+        <span class="text-sm text-cashea-gray-17">Página ${res.page} de ${res.totalPages} (${res.total} total)</span>
+        <div class="flex gap-2">
+          <button ${res.page <= 1 ? 'disabled' : ''} onclick="ordersPage--; reloadOrders()" class="px-3 py-1 bg-white rounded text-sm disabled:opacity-30">← Anterior</button>
+          <button ${res.page >= res.totalPages ? 'disabled' : ''} onclick="ordersPage++; reloadOrders()" class="px-3 py-1 bg-white rounded text-sm disabled:opacity-30">Siguiente →</button>
+        </div>
+      </div>
+    ` : ''}
+  `;
+}
+
+async function showOrderDetail(orderNumber) {
+  const c = document.getElementById('content');
+  c.innerHTML = spinner();
+  const [order, installments] = await Promise.all([
+    api(`/orders/${orderNumber}`),
+    api(`/orders/${orderNumber}/installments`),
+  ]);
+
+  c.innerHTML = `
+    <button onclick="viewOrders()" class="text-sm text-cashea-gray-17 hover:text-cashea-gray-15 mb-3">← Volver a órdenes</button>
+    <h2 class="text-xl font-bold mb-4">Orden ${order.orderNumber}</h2>
+
+    <div class="grid md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+        <h3 class="font-semibold mb-2 text-cashea-gray-2">Estado</h3>
+        <div class="space-y-1 text-sm">
+          <div>${statusBadge(order.status)} <span class="text-cashea-gray-17 ml-2">${order.channel || ''}</span></div>
+          ${order.shipmentStatus ? `<div class="text-cashea-gray-17 text-xs">Envío: ${order.shipmentStatus}</div>` : ''}
+          ${order.scenarioTags && order.scenarioTags.length > 0 ? `<div class="pt-1">${order.scenarioTags.map(t => badge(t, 'yellow')).join(' ')}</div>` : ''}
+        </div>
+      </div>
+      <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+        <h3 class="font-semibold mb-2 text-cashea-gray-2">Montos</h3>
+        <dl class="text-sm space-y-1">
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">Total</dt><dd class="font-bold">${fmtMoney(order.totalAmount)}</dd></div>
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">Inicial</dt><dd class="text-cashea-green-14">${fmtMoney(order.downPaymentAmount)}</dd></div>
+          <div class="flex justify-between"><dt class="text-cashea-gray-17">Financiado</dt><dd>${fmtMoney(order.financedAmount)}</dd></div>
+        </dl>
+      </div>
+      <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+        <h3 class="font-semibold mb-2 text-cashea-gray-2">Comprador</h3>
+        <dl class="text-sm space-y-1">
+          <div>${order.buyer ? order.buyer.fullName : '—'}</div>
+          <div class="text-cashea-gray-17 text-xs">${order.buyer ? order.buyer.identificationNumber : ''}</div>
+          <div class="text-cashea-gray-17 text-xs">${order.buyer ? order.buyer.phoneNumber : ''}</div>
+        </dl>
+      </div>
+    </div>
+
+    ${order.products && order.products.length > 0 ? `
+    <div class="bg-white rounded-lg p-4 border border-cashea-gray-18 mb-4">
+      <h3 class="font-semibold mb-3 text-cashea-gray-2">Productos</h3>
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-cashea-gray-17"><th class="py-1">Producto</th><th class="text-center">Cant.</th><th class="text-right">Precio</th></tr></thead>
+        <tbody>
+          ${order.products.map(p => `
+            <tr class="border-t border-cashea-gray-18">
+              <td class="py-1">${p.name}</td>
+              <td class="text-center">${p.quantity}</td>
+              <td class="text-right">${fmtMoney(p.price)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
+
+    ${(installments.data || []).length > 0 ? `
+    <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+      <h3 class="font-semibold mb-3 text-cashea-gray-2">Cuotas</h3>
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-cashea-gray-17 border-b border-cashea-gray-18">
+          <th class="py-2">#</th><th>Monto</th><th>Vencimiento</th><th>Estado</th><th>Pago</th><th>Referencia</th>
+        </tr></thead>
+        <tbody>
+          ${installments.data.map(inst => `
+            <tr class="border-b border-cashea-gray-18">
+              <td class="py-2 font-mono">${inst.installmentNumber}</td>
+              <td>${fmtMoney(inst.amount)}</td>
+              <td class="text-cashea-gray-17 text-xs">${fmtDate(inst.dueDate)}</td>
+              <td>${statusBadge(inst.status)}</td>
+              <td>${inst.payments && inst.payments.length > 0 ? inst.payments.map(p => `
+                <div class="text-xs">${statusBadge(p.paymentStatus)} ${fmtMoney(p.assignedAmount)}${p.amountVES ? ' / ' + fmtMoneyVES(p.amountVES) : ''}</div>
+              `).join('') : '<span class="text-cashea-gray-16 text-xs">—</span>'}</td>
+              <td class="text-xs text-cashea-gray-17">${inst.payments && inst.payments[0] ? inst.payments[0].referenceNumber || '—' : '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
+  `;
+}
+
+// ── Conciliación ───────────────────────────────────────────────────
+async function viewConciliation() {
+  const c = document.getElementById('content');
+  const storesRes = await api(`/merchants/${selectedMerchant.id}/stores`);
+  const stores = storesRes.data || [];
+  if (stores.length === 0) {
+    c.innerHTML = '<p class="text-cashea-gray-16">Sin tiendas</p>';
+    return;
+  }
+  if (!currentStoreUuid) currentStoreUuid = stores[0].uuid;
+
+  c.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Conciliación Diaria</h2>
+    <div class="flex gap-2 mb-4">
+      <select id="store-select" onchange="changeStoreConc(this.value)" class="bg-white border border-cashea-gray-18 rounded px-3 py-2 text-sm">
+        ${stores.map(s => `<option value="${s.uuid}" ${s.uuid === currentStoreUuid ? 'selected' : ''}>${s.name}</option>`).join('')}
+      </select>
+    </div>
+    <div id="conc-detail">${spinner()}</div>
+  `;
+  await loadConcDetail();
+}
+
+async function changeStoreConc(uuid) {
+  currentStoreUuid = uuid;
+  await loadConcDetail();
+}
+
+async function loadConcDetail() {
+  const el = document.getElementById('conc-detail');
+  if (!el) return;
+  el.innerHTML = spinner();
+  const res = await api(`/stores/${currentStoreUuid}/daily-conciliation/history?limit=15`);
+  const concs = res.data || [];
+  if (concs.length === 0) {
+    el.innerHTML = '<p class="text-cashea-gray-16 py-4">Sin conciliaciones</p>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="space-y-3">
+      ${concs.map(c => `
+        <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-semibold">${fmtDate(c.date)}</span>
+            ${c.scenarioTags && c.scenarioTags.length > 0 ? c.scenarioTags.map(t => badge(t, 'yellow')).join(' ') : ''}
+          </div>
+          <div class="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <div class="text-cashea-gray-17 text-xs">Órdenes</div>
+              <div class="text-lg font-bold">${c.ordersCount}</div>
+            </div>
+            <div>
+              <div class="text-cashea-gray-17 text-xs">Total cobrado</div>
+              <div class="text-lg font-bold text-cashea-green-14">${fmtMoney(c.totalChargedAmount)}</div>
+            </div>
+            <div>
+              <div class="text-cashea-gray-17 text-xs">Total financiado</div>
+              <div class="text-lg font-bold">${fmtMoney(c.totalFinancedAmount)}</div>
+            </div>
+          </div>
+          ${c.posConciliations && c.posConciliations.length > 0 ? `
+          <div class="mt-3 pt-3 border-t border-cashea-gray-18">
+            <div class="text-xs text-cashea-gray-17 mb-1">Por caja (POS):</div>
+            ${c.posConciliations.map(pc => `
+              <div class="flex justify-between text-xs text-cashea-gray-2">
+                <span>${pc.pos.name}</span>
+                <span>${pc.ordersCount} órdenes — ${fmtMoney(pc.totalChargedAmount)}</span>
+              </div>
+            `).join('')}
+          </div>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ── Reporte Mensual ────────────────────────────────────────────────
+async function viewMonthly() {
+  const c = document.getElementById('content');
+  c.innerHTML = spinner();
+  const res = await api(`/merchants/${selectedMerchant.id}/monthly-reports`);
+  const reports = res.data || [];
+  if (reports.length === 0) {
+    c.innerHTML = '<p class="text-cashea-gray-16">Sin reportes mensuales</p>';
+    return;
+  }
+  c.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Reportes Mensuales</h2>
+    <div class="space-y-4">
+      ${reports.map(r => `
+        <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+          <div class="flex items-center justify-between mb-3">
+            <span class="font-semibold text-lg">${fmtPeriod(r.periodLabel)}</span>
+            <span class="text-xs text-cashea-gray-17">${fmtDate(r.period.from)} — ${fmtDate(r.period.to)}</span>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <div class="bg-cashea-gray-20 rounded p-2">
+              <div class="text-xs text-cashea-gray-17">Compensación</div>
+              <div class="font-bold ${r.compensation.shouldMerchantPay ? 'text-cashea-red-13' : 'text-cashea-green-14'}">${fmtMoney(r.compensation.totalAmount)}</div>
+              <div class="text-xs text-cashea-gray-16">${r.compensation.shouldMerchantPay ? 'Merchant paga' : 'Cashea paga'}</div>
+            </div>
+            <div class="bg-cashea-gray-20 rounded p-2">
+              <div class="text-xs text-cashea-gray-17">Service fee</div>
+              <div class="font-bold">${fmtMoney(r.serviceFee.amount)}</div>
+              <div class="text-xs text-cashea-gray-16">ISRL: ${fmtMoney(r.serviceFee.isrlRetainedAmount)}</div>
+            </div>
+            <div class="bg-cashea-gray-20 rounded p-2">
+              <div class="text-xs text-cashea-gray-17">Cuotas no recibidas</div>
+              <div class="font-bold">${fmtMoney(r.missedInstallments.amount)}</div>
+            </div>
+            <div class="bg-cashea-gray-20 rounded p-2">
+              <div class="text-xs text-cashea-gray-17">Errores y ajustes</div>
+              <div class="font-bold">${fmtMoney(r.errorsAndAdjustments.amount)}</div>
+            </div>
+          </div>
+
+          ${r.paymentTimeline && r.paymentTimeline.length > 0 ? `
+          <div class="flex items-center gap-2 flex-wrap">
+            ${r.paymentTimeline.map(step => `
+              <div class="flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full ${step.status === 'completed' ? 'bg-cashea-green-14' : step.status === 'in-progress' ? 'bg-cashea-yellow-4' : 'bg-cashea-gray-19'}"></span>
+                <span class="text-xs ${step.status === 'completed' ? 'text-cashea-gray-2' : 'text-cashea-gray-16'}">${step.stepKey.replace(/_/g, ' ')}</span>
+                ${step.date ? `<span class="text-xs text-cashea-gray-19">${fmtDate(step.date)}</span>` : ''}
+              </div>
+            `).join('<span class="text-cashea-gray-19">→</span>')}
+          </div>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ── Payouts ────────────────────────────────────────────────────────
+async function viewPayouts() {
+  const c = document.getElementById('content');
+  c.innerHTML = spinner();
+  const res = await api(`/merchants/${selectedMerchant.id}/payouts`);
+  const payouts = res.data || [];
+  c.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Transferencias (Payouts)</h2>
+    ${payouts.length === 0 ? '<p class="text-cashea-gray-16">Sin transferencias</p>' : `
+    <div class="space-y-3">
+      ${payouts.map(p => `
+        <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span class="font-semibold">${fmtPeriod(p.periodLabel)}</span>
+              <span class="text-xs text-cashea-gray-17 ml-2">${fmtDate(p.periodFrom)} — ${fmtDate(p.periodTo)}</span>
+            </div>
+            ${statusBadge(p.status)}
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+            <div><span class="text-cashea-gray-17 text-xs">Bruto</span><div class="font-semibold text-cashea-green-14">${fmtMoney(p.grossAmount)}</div></div>
+            <div><span class="text-cashea-gray-17 text-xs">Service fee</span><div class="text-cashea-red-13">-${fmtMoney(p.serviceFee)}</div></div>
+            <div><span class="text-cashea-gray-17 text-xs">Retenciones</span><div class="text-cashea-red-13">-${fmtMoney(p.retentions)}</div></div>
+            <div><span class="text-cashea-gray-17 text-xs">Ajustes</span><div>${p.adjustments >= 0 ? '+' : ''}${fmtMoney(p.adjustments)}</div></div>
+            <div><span class="text-cashea-gray-17 text-xs">Neto</span><div class="font-bold text-lg ${p.status === 'SENT' ? 'text-cashea-green-14' : 'text-cashea-gray-15'}">${fmtMoney(p.netAmount)}</div></div>
+          </div>
+          ${p.status === 'SENT' ? `
+          <div class="mt-2 pt-2 border-t border-cashea-gray-18 text-xs text-cashea-gray-17">
+            Transferido: ${fmtDate(p.sentAt)} · Ref: ${p.bankReference || '—'} · Cuenta: ****${p.bankAccountLast4}
+          </div>` : p.status === 'PENDING' ? `
+          <div class="mt-2 pt-2 border-t border-cashea-gray-18 text-xs text-cashea-gray-17">
+            ⏳ Pendiente de transferencia
+          </div>` : ''}
+          ${p.scenarioTags && p.scenarioTags.length > 0 ? `<div class="mt-1">${p.scenarioTags.map(t => badge(t, 'yellow')).join(' ')}</div>` : ''}
+        </div>
+      `).join('')}
+    </div>`}
+  `;
+}
+
+// ── Facturas ───────────────────────────────────────────────────────
+async function viewInvoices() {
+  const c = document.getElementById('content');
+  c.innerHTML = spinner();
+  const res = await api(`/merchants/${selectedMerchant.id}/invoices`);
+  const invoices = res.data || [];
+  c.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Facturas</h2>
+    ${invoices.length === 0 ? '<p class="text-cashea-gray-16">Sin facturas</p>' : `
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-cashea-gray-17 border-b border-cashea-gray-18">
+          <th class="py-2">Periodo</th><th>Número</th><th class="text-right">Monto</th><th class="text-right">IVA</th><th class="text-right">ISRL</th><th>Estado</th><th>Enviada</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${invoices.map(inv => `
+          <tr class="border-b border-cashea-gray-18">
+            <td class="py-2 font-mono">${fmtPeriod(inv.periodLabel)}</td>
+            <td class="text-xs">${inv.number || '—'}</td>
+            <td class="text-right">${fmtMoney(inv.amount)}</td>
+            <td class="text-right text-cashea-gray-17">${fmtMoney(inv.iva)}</td>
+            <td class="text-right text-cashea-gray-17">${fmtMoney(inv.isrlRetained)}</td>
+            <td>${statusBadge(inv.status)}</td>
+            <td class="text-xs text-cashea-gray-17">${inv.sentAt ? fmtDate(inv.sentAt) : '—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>`}
+  `;
+}
+
+// ── Empleados ──────────────────────────────────────────────────────
+async function viewEmployees() {
+  const c = document.getElementById('content');
+  c.innerHTML = spinner();
+  const res = await api(`/merchants/${selectedMerchant.id}/employees`);
+  const employees = res.data || [];
+  c.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Empleados</h2>
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-cashea-gray-17 border-b border-cashea-gray-18">
+          <th class="py-2">Nombre</th><th>Email</th><th>Rol</th><th>Onboarding</th><th>2FA</th><th>Cód. seguridad</th><th>Last login</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${employees.map(e => `
+          <tr class="border-b border-cashea-gray-18">
+            <td class="py-2 font-semibold">${e.name} ${e.scenarioTags && e.scenarioTags.length > 0 ? e.scenarioTags.map(t => badge(t, 'yellow')).join(' ') : ''}</td>
+            <td class="text-xs text-cashea-gray-17">${e.email}</td>
+            <td>${badge(e.role, e.role === 'ADMIN' ? 'brand' : e.role === 'MANAGER' ? 'dark' : 'gray')}</td>
+            <td>${statusBadge(e.onboardingStatus)}</td>
+            <td>${e.phoneRegistered ? badge('✓', 'green') : badge('✗', 'red')}</td>
+            <td>${e.securityCodeSet ? badge('✓', 'green') : badge('✗', 'red')}</td>
+            <td class="text-xs text-cashea-gray-17">${e.lastLoginAt ? fmtDateTime(e.lastLoginAt) : 'Nunca'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+// ── Promociones ────────────────────────────────────────────────────
+async function viewPromotions() {
+  const c = document.getElementById('content');
+  c.innerHTML = spinner();
+  const res = await api(`/merchants/${selectedMerchant.id}/promotions`);
+  const promos = res.data || [];
+  c.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Promociones</h2>
+    ${promos.length === 0 ? '<p class="text-cashea-gray-16">Sin promociones</p>' : `
+    <div class="grid md:grid-cols-2 gap-4">
+      ${promos.map(p => `
+        <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-semibold">${p.title}</span>
+            <div class="flex gap-1">
+              ${badge(p.status, p.status === 'ACTIVE' ? 'green' : 'gray')}
+              ${badge(p.enrollmentStatus, p.enrollmentStatus === 'JOINED' ? 'green' : p.enrollmentStatus === 'AVAILABLE' ? 'dark' : 'gray')}
+            </div>
+          </div>
+          ${p.description ? `<p class="text-sm text-cashea-gray-17 mb-2">${p.description}</p>` : ''}
+          ${p.mechanics && p.mechanics.length > 0 ? `
+          <div class="flex gap-1 flex-wrap">
+            ${p.mechanics.map(m => badge(m.kind, 'brand')).join('')}
+          </div>` : ''}
+          ${p.conditionGroups && p.conditionGroups.length > 0 ? `
+          <div class="mt-2 text-xs text-cashea-gray-16">
+            Condiciones: ${p.conditionGroups.map(cg => cg.name).join(', ')}
+          </div>` : ''}
+        </div>
+      `).join('')}
+    </div>`}
+  `;
+}
+
+// ── Tiendas ────────────────────────────────────────────────────────
+async function viewStores() {
+  const c = document.getElementById('content');
+  c.innerHTML = spinner();
+  const res = await api(`/merchants/${selectedMerchant.id}/stores`);
+  const stores = res.data || [];
+  c.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Tiendas</h2>
+    <div class="grid md:grid-cols-2 gap-4">
+      ${stores.map(s => `
+        <div class="bg-white rounded-lg p-4 border border-cashea-gray-18">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-semibold">${s.name}</span>
+            ${badge(s.statusId === 2 ? 'ACTIVE' : 'INACTIVE', s.statusId === 2 ? 'green' : 'gray')}
+          </div>
+          <dl class="text-sm space-y-1">
+            <div class="flex justify-between"><dt class="text-cashea-gray-17">Email</dt><dd class="text-xs">${s.email || '—'}</dd></div>
+            <div class="flex justify-between"><dt class="text-cashea-gray-17">Canales</dt><dd class="text-xs">${(s.channels || []).join(', ')}</dd></div>
+            <div class="flex justify-between"><dt class="text-cashea-gray-17">Inicial mínima</dt><dd>${fmtMoney(s.minimumDownPayment)}</dd></div>
+            <div class="flex justify-between"><dt class="text-cashea-gray-17">Física</dt><dd>${s.isPhysical ? 'Sí' : 'No'}</dd></div>
+            ${s.scenarioTags && s.scenarioTags.length > 0 ? `<div class="pt-1">${s.scenarioTags.map(t => badge(t, 'yellow')).join(' ')}</div>` : ''}
+          </dl>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ── Escenarios ─────────────────────────────────────────────────────
+async function viewScenarios() {
+  const c = document.getElementById('content');
+  c.innerHTML = spinner();
+  const res = await api(`/scenarios`);
+  const scenarios = res.data || [];
+  c.innerHTML = `
+    <h2 class="text-xl font-bold mb-1">Catálogo de Escenarios</h2>
+    <p class="text-sm text-cashea-gray-17 mb-4">22 escenarios derivados de conversaciones reales de soporte. Cada uno tiene entidades sembradas y navegables.</p>
+    <div class="space-y-2">
+      ${scenarios.map(s => {
+        const affected = Object.entries(s.affected || {}).filter(([,v]) => v.length > 0);
+        return `
+        <div class="bg-white rounded-lg p-3 border border-cashea-gray-18">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="font-mono text-sm text-cashea-gray-2">${s.tag}</span>
+              <p class="text-xs text-cashea-gray-17 mt-0.5">${s.description}</p>
+            </div>
+            <div class="flex gap-1 flex-wrap justify-end">
+              ${affected.map(([k, v]) => badge(`${k}: ${v.length}`, 'dark')).join('') || badge('sin entidades', 'gray')}
+            </div>
+          </div>
+        </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Chat Widget (inline port of frontend/src/components/chat)
+// ════════════════════════════════════════════════════════════════════
+const AGENT_API = window.AGENT_API_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
+const CHAT_SUGGESTIONS = [
+  '¿Dónde veo mis transferencias?',
+  'Necesito conciliar una venta',
+  'Tengo problemas con el 2FA',
+  'Quiero cancelar una orden',
+];
+const CHAT_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const CHAT_MAX_IMAGES = 4;
+const CHAT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+let chatOpen = false;
+const chatState = {
+  messages: [],
+  conversationId: null,
+  identityKey: 'merchant:anonymous',
+  isStreaming: false,
+  controller: null,
+  pendingImages: [],
+  isReadingFiles: false,
+  attachmentVersion: 0,
+  restoreVersion: 0,
+};
+
+const CHAT_ICONS = {
+  chevron: '<svg class="chat-activity-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
+  tool: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>',
+};
+
+function chatIdentityKey() {
+  return `merchant:${selectedMerchant ? selectedMerchant.id : 'anonymous'}`;
+}
+
+function chatStorageKey() {
+  return `csa:merchantConversationId:${chatState.identityKey}`;
+}
+
+function chatNewId() {
+  return crypto.randomUUID();
+}
+
+function setChatStreaming(streaming) {
+  chatState.isStreaming = streaming;
+  document.getElementById('chat-send').style.display = streaming ? 'none' : 'inline-flex';
+  document.getElementById('chat-stop').style.display = streaming ? 'inline-flex' : 'none';
+  document.getElementById('chat-attach').disabled = streaming || chatState.isReadingFiles || chatState.pendingImages.length >= CHAT_MAX_IMAGES;
+  document.getElementById('chat-input').disabled = streaming;
+  updateChatSendButton();
+}
+
+function updateChatSendButton() {
+  const input = document.getElementById('chat-input');
+  document.getElementById('chat-send').disabled = chatState.isStreaming || chatState.isReadingFiles || !input.value.trim();
+}
+
+function renderChatEmpty(container) {
+  const empty = document.createElement('div');
+  empty.className = 'chat-empty';
+  const copy = document.createElement('div');
+  const title = document.createElement('h2');
+  title.textContent = '¿Cómo podemos ayudarte?';
+  const subtitle = document.createElement('p');
+  subtitle.textContent = selectedMerchant
+    ? 'Consulta tus operaciones y recibe ayuda en tiempo real.'
+    : 'Puedes preguntar antes de identificar tu comercio.';
+  copy.append(title, subtitle);
+
+  const suggestions = document.createElement('div');
+  suggestions.className = 'chat-suggestions';
+  CHAT_SUGGESTIONS.forEach((text) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'chat-suggestion';
+    button.textContent = text;
+    button.addEventListener('click', () => sendChatMessage(text));
+    suggestions.appendChild(button);
+  });
+  empty.append(copy, suggestions);
+  container.appendChild(empty);
+}
+
+function renderChatMessages() {
+  const viewport = document.getElementById('chat-messages');
+  const nearBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 100;
+  const list = document.createElement('div');
+  list.className = 'chat-message-list';
+
+  if (chatState.messages.length === 0) {
+    renderChatEmpty(list);
+  } else {
+    chatState.messages.forEach((message) => list.appendChild(renderChatMessage(message)));
+  }
+
+  viewport.replaceChildren(list);
+  if (nearBottom || chatState.isStreaming) {
+    requestAnimationFrame(() => { viewport.scrollTop = viewport.scrollHeight; });
+  }
+}
+
+function renderChatMessage(message) {
+  if (message.role === 'user') {
+    const row = document.createElement('div');
+    row.className = 'chat-user-row';
+    const content = document.createElement('div');
+    content.className = 'chat-user-content';
+    message.parts.forEach((part) => {
+      if (part.type === 'image') {
+        const image = document.createElement('img');
+        image.src = part.previewUrl;
+        image.alt = 'Imagen adjunta';
+        image.className = 'chat-sent-image';
+        content.appendChild(image);
+      } else if (part.type === 'text') {
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-user-bubble';
+        bubble.textContent = part.text;
+        content.appendChild(bubble);
+      }
+    });
+    row.appendChild(content);
+    return row;
+  }
+
+  const assistant = document.createElement('div');
+  assistant.className = 'chat-assistant';
+  if (message.streaming && message.parts.length === 0) {
+    const typing = document.createElement('div');
+    typing.className = 'chat-typing';
+    typing.innerHTML = '<span></span><span></span><span></span>';
+    assistant.appendChild(typing);
+  } else {
+    message.parts.forEach((part, index) => {
+      if (part.type === 'text') {
+        const markdown = document.createElement('div');
+        markdown.className = 'chat-markdown';
+        renderChatMarkdown(markdown, part.text);
+        assistant.appendChild(markdown);
+      } else if (part.type === 'steps') {
+        assistant.appendChild(renderChatActivity(part.steps, message.streaming && index === message.parts.length - 1));
+      } else if (part.type === 'choice') {
+        assistant.appendChild(renderChatChoice(part));
+      }
+    });
+    if (message.streaming) {
+      const cursor = document.createElement('span');
+      cursor.className = 'chat-cursor';
+      assistant.appendChild(cursor);
+    }
+  }
+  if (message.error) {
+    const error = document.createElement('p');
+    error.className = 'chat-error';
+    error.textContent = message.error;
+    assistant.appendChild(error);
+  }
+  return assistant;
+}
+
+function renderChatMarkdown(container, text) {
+  if (!window.marked || !window.DOMPurify) {
+    container.textContent = text;
+    return;
+  }
+
+  const html = window.marked.parse(text, { gfm: true, breaks: false });
+  container.innerHTML = window.DOMPurify.sanitize(html, {
+    FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'option', 'img'],
+    FORBID_ATTR: ['style', 'id', 'name'],
+    ALLOW_DATA_ATTR: false,
+  });
+  container.querySelectorAll('a').forEach((link) => {
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+  });
+  container.querySelectorAll('pre').forEach((pre) => {
+    const code = pre.querySelector('code');
+    if (!code || pre.parentElement?.classList.contains('chat-code-block')) return;
+    const match = Array.from(code.classList).find((name) => name.startsWith('language-'));
+    const language = match ? match.slice('language-'.length) : 'text';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chat-code-block';
+    const header = document.createElement('div');
+    header.className = 'chat-code-header';
+    const label = document.createElement('span');
+    label.className = 'chat-code-language';
+    label.textContent = language;
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'chat-copy-code';
+    copy.textContent = 'Copiar';
+    copy.addEventListener('click', () => {
+      navigator.clipboard.writeText(code.textContent || '').then(() => {
+        copy.textContent = 'Copiado';
+        setTimeout(() => { copy.textContent = 'Copiar'; }, 2000);
+      }).catch(() => {});
+    });
+    header.append(label, copy);
+    pre.replaceWith(wrapper);
+    wrapper.append(header, pre);
+  });
+}
+
+function summarizeChatActivity(steps, streaming) {
+  if (streaming) {
+    return steps.find((step) => step.status === 'running')?.label || steps.at(-1)?.label || 'Procesando';
+  }
+  const summary = [];
+  if (steps.some((step) => step.kind === 'memory')) summary.push('Consultó memoria');
+  const tools = steps.filter((step) => step.kind === 'tool').length;
+  if (tools) summary.push(`${tools} ${tools === 1 ? 'acción' : 'acciones'}`);
+  return summary.join(', ') || 'Listo';
+}
+
+function renderChatActivity(steps, streaming) {
+  const details = document.createElement('details');
+  details.className = 'chat-activity';
+  details.open = streaming;
+  const summary = document.createElement('summary');
+  const label = document.createElement('span');
+  label.textContent = summarizeChatActivity(steps, streaming);
+  if (streaming) label.className = 'chat-shimmer';
+  summary.append(label);
+  summary.insertAdjacentHTML('beforeend', CHAT_ICONS.chevron);
+  details.appendChild(summary);
+
+  const list = document.createElement('ol');
+  list.className = 'chat-activity-list';
+  steps.forEach((step) => {
+    const row = document.createElement('li');
+    row.className = 'chat-activity-row';
+    row.innerHTML = step.kind === 'memory' ? CHAT_ICONS.search : CHAT_ICONS.tool;
+    const text = document.createElement('span');
+    text.textContent = step.label;
+    if (step.status === 'running') text.className = 'chat-shimmer';
+    row.appendChild(text);
+    list.appendChild(row);
+  });
+  if (!streaming) {
+    const done = document.createElement('li');
+    done.className = 'chat-activity-row';
+    done.innerHTML = CHAT_ICONS.check;
+    const text = document.createElement('span');
+    text.textContent = 'Listo';
+    done.appendChild(text);
+    list.appendChild(done);
+  }
+  details.appendChild(list);
+  return details;
+}
+
+function renderChatChoice(choice) {
+  const container = document.createElement('div');
+  container.className = 'chat-choice';
+  const prompt = document.createElement('p');
+  prompt.className = 'chat-choice-prompt';
+  prompt.textContent = choice.prompt;
+  container.appendChild(prompt);
+
+  const picked = choice.options.find((option) => option.id === choice.resolvedOptionId);
+  if (choice.resolved || picked) {
+    const settled = document.createElement('div');
+    settled.className = 'chat-choice-settled';
+    const check = document.createElement('span');
+    check.className = 'chat-choice-check';
+    check.textContent = '✓';
+    const label = document.createElement('span');
+    label.textContent = picked?.label || 'Respondido';
+    settled.append(check, label);
+    container.appendChild(settled);
+    return container;
+  }
+
+  const options = document.createElement('div');
+  options.className = 'chat-choice-options';
+  choice.options.forEach((option) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'chat-choice-option';
+    button.textContent = option.label;
+    button.disabled = chatState.isStreaming;
+    button.addEventListener('click', () => { void sendChatChoice(option.id); });
+    options.appendChild(button);
+  });
+  container.appendChild(options);
+  return container;
+}
+
+function patchChatMessage(id, changes) {
+  const message = chatState.messages.find((item) => item.id === id);
+  if (message) Object.assign(message, changes);
+  renderChatMessages();
+}
+
+function addChatStep(id, step) {
+  const message = chatState.messages.find((item) => item.id === id);
+  if (!message) return;
+  const last = message.parts.at(-1);
+  if (last?.type === 'steps') last.steps.push(step);
+  else message.parts.push({ type: 'steps', steps: [step] });
+  renderChatMessages();
+}
+
+function chatChoiceOptions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((option) =>
+    option && typeof option.id === 'string' && typeof option.label === 'string'
+  ).map((option) => ({ id: option.id, label: option.label }));
+}
+
+function addChatChoice(id, prompt, options) {
+  const message = chatState.messages.find((item) => item.id === id);
+  if (!message) return;
+  message.parts.push({ type: 'choice', prompt, options });
+  renderChatMessages();
+}
+
+function resolvePendingChatChoice(optionId) {
+  for (let messageIndex = chatState.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = chatState.messages[messageIndex];
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.parts[partIndex];
+      if (part.type !== 'choice' || part.resolved) continue;
+      part.resolved = true;
+      if (optionId) part.resolvedOptionId = optionId;
+      return true;
+    }
+  }
+  return false;
+}
+
+function finishChatStep(id, tool) {
+  const message = chatState.messages.find((item) => item.id === id);
+  if (!message) return;
+  for (const part of message.parts) {
+    if (part.type !== 'steps') continue;
+    const step = part.steps.find((item) => item.tool === tool && item.status === 'running');
+    if (step) {
+      step.status = 'done';
+      break;
+    }
+  }
+  renderChatMessages();
+}
+
+function appendChatDelta(id, delta) {
+  const message = chatState.messages.find((item) => item.id === id);
+  if (!message) return;
+  const last = message.parts.at(-1);
+  if (last?.type === 'text') last.text += delta;
+  else message.parts.push({ type: 'text', text: delta });
+  renderChatMessages();
+}
+
+function chatHeaders() {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Agent-Profile': 'merchant',
+  };
+  if (selectedMerchant) headers['X-Merchant-Id'] = String(selectedMerchant.id);
+  return headers;
+}
+
+async function sendChatMessage(text) {
+  const trimmed = text.trim();
+  if (!trimmed || chatState.isStreaming || chatState.isReadingFiles) return;
+
+  // A user can send before an in-flight transcript restore finishes. Once a
+  // new turn starts, that stale restore must not overwrite the live messages.
+  chatState.restoreVersion += 1;
+  const resolvingChoice = resolvePendingChatChoice();
+  const images = chatState.pendingImages;
+  const userParts = images.map((image) => ({ type: 'image', previewUrl: image.previewUrl }));
+  userParts.push({ type: 'text', text: trimmed });
+  chatState.messages.push({ id: chatNewId(), role: 'user', parts: userParts });
+  chatState.pendingImages = [];
+  const input = document.getElementById('chat-input');
+  input.value = '';
+  input.style.height = 'auto';
+  renderChatPreviews();
+  await runMerchantChatTurn({ message: trimmed, images, resolvingChoice });
+}
+
+async function sendChatChoice(optionId) {
+  if (!optionId || chatState.isStreaming || !chatState.conversationId) return;
+  chatState.restoreVersion += 1;
+  const resolvingChoice = resolvePendingChatChoice(optionId);
+  renderChatMessages();
+  await runMerchantChatTurn({ choiceId: optionId, images: [], resolvingChoice });
+}
+
+async function runMerchantChatTurn({ message, choiceId, images, resolvingChoice = false }) {
+  const assistantId = chatNewId();
+  chatState.messages.push({ id: assistantId, role: 'assistant', parts: [], streaming: true });
+  setChatStreaming(true);
+  renderChatMessages();
+
+  const controller = new AbortController();
+  chatState.controller = controller;
+  const identityAtSend = chatState.identityKey;
+
+  try {
+    await streamMerchantChat({
+      message,
+      choiceId,
+      conversationId: chatState.conversationId,
+      images,
+      assistantId,
+      controller,
+      identityAtSend,
+    });
+    patchChatMessage(assistantId, { streaming: false });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      patchChatMessage(assistantId, { streaming: false });
+    } else {
+      patchChatMessage(assistantId, {
+        streaming: false,
+        error: error instanceof Error ? error.message : 'No se pudo completar la respuesta.',
+      });
+    }
+    if (resolvingChoice) await restoreChatConversation();
+  } finally {
+    if (chatState.controller === controller) {
+      chatState.controller = null;
+      setChatStreaming(false);
+    }
+  }
+}
+
+async function streamMerchantChat({ message, choiceId, conversationId, images, assistantId, controller, identityAtSend }) {
+  const response = await fetch(`${AGENT_API}/v1/chat/stream`, {
+    method: 'POST',
+    headers: chatHeaders(),
+    body: JSON.stringify({
+      message,
+      choice_id: choiceId,
+      session_id: conversationId || undefined,
+      images: images.length ? images.map((image) => ({ media_type: image.mediaType, data: image.data })) : undefined,
+    }),
+    signal: controller.signal,
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.detail || `Error del servicio (${response.status})`);
+  }
+  if (!response.body) throw new Error('El servicio no devolvió una respuesta continua.');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let sawDelta = false;
+  let renderedChoice = false;
+  let terminal = false;
+  const handleFrame = (raw) => {
+    const frame = parseChatSse(raw);
+    if (!frame.event || !frame.data) return false;
+    const payload = JSON.parse(frame.data);
+    if (chatState.identityKey !== identityAtSend) return true;
+    switch (frame.event) {
+      case 'session':
+        if (payload.session_id) {
+          chatState.conversationId = payload.session_id;
+          localStorage.setItem(chatStorageKey(), payload.session_id);
+        }
+        break;
+      case 'gate':
+        if (payload.decision === 'retrieve') {
+          addChatStep(assistantId, { id: chatNewId(), kind: 'memory', label: 'Consultando memoria', status: 'done' });
+        }
+        break;
+      case 'tool_start':
+        addChatStep(assistantId, { id: chatNewId(), kind: 'tool', tool: payload.tool, label: payload.label || payload.tool, status: 'running' });
+        break;
+      case 'tool':
+        finishChatStep(assistantId, payload.tool);
+        break;
+      case 'choice': {
+        const options = chatChoiceOptions(payload.options);
+        if (typeof payload.prompt === 'string' && options.length) {
+          addChatChoice(assistantId, payload.prompt, options);
+          renderedChoice = true;
+        }
+        break;
+      }
+      case 'delta':
+        sawDelta = true;
+        appendChatDelta(assistantId, String(payload));
+        break;
+      case 'done': {
+        const reply = payload && typeof payload === 'object' ? payload.reply : payload;
+        if (!sawDelta && !renderedChoice && reply) appendChatDelta(assistantId, String(reply));
+        terminal = true;
+        return true;
+      }
+      case 'error':
+        throw new Error(String(payload) || 'El agente encontró un error.');
+      case 'limit_reached':
+        break;
+    }
+    return false;
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, '\n');
+      let separator;
+      while ((separator = buffer.indexOf('\n\n')) !== -1) {
+        const raw = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        if (handleFrame(raw)) return;
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) handleFrame(buffer);
+    if (!terminal) throw new Error('La respuesta terminó antes de completarse.');
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseChatSse(raw) {
+  let event = '';
+  const data = [];
+  raw.split('\n').forEach((line) => {
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+  });
+  return { event, data: data.join('\n') };
+}
+
+function partsFromChatSegments(segments, fallback) {
+  if (!Array.isArray(segments) || segments.length === 0) {
+    return fallback ? [{ type: 'text', text: fallback }] : [];
+  }
+  const parts = [];
+  segments.forEach((segment) => {
+    if (segment?.type === 'text' && typeof segment.text === 'string') {
+      parts.push({ type: 'text', text: segment.text });
+    } else if (segment?.type === 'tools' && Array.isArray(segment.calls)) {
+      const steps = segment.calls.filter((call) => call && typeof call === 'object').map((call, index) => ({
+        id: `${call.tool || 'tool'}-${index}`,
+        kind: 'tool',
+        tool: call.tool,
+        label: call.label || call.tool || 'Acción',
+        status: 'done',
+      }));
+      if (steps.length) parts.push({ type: 'steps', steps });
+    } else if (segment?.type === 'choice' && typeof segment.prompt === 'string') {
+      const options = chatChoiceOptions(segment.options);
+      if (options.length) {
+        parts.push({
+          type: 'choice',
+          prompt: segment.prompt,
+          options,
+          resolved: segment.resolved === true,
+          resolvedOptionId: typeof segment.resolvedOptionId === 'string'
+            ? segment.resolvedOptionId
+            : undefined,
+        });
+      }
+    }
+  });
+  return parts.length ? parts : (fallback ? [{ type: 'text', text: fallback }] : []);
+}
+
+async function restoreChatConversation() {
+  const version = ++chatState.restoreVersion;
+  const stored = localStorage.getItem(chatStorageKey());
+  if (!stored) {
+    renderChatMessages();
+    return;
+  }
+  try {
+    const response = await fetch(`${AGENT_API}/v1/sessions/${stored}/messages`, {
+      headers: chatHeaders(),
+    });
+    if (!response.ok) {
+      if (response.status === 404) localStorage.removeItem(chatStorageKey());
+      throw new Error(`No se pudo recuperar la conversación (${response.status})`);
+    }
+    const rows = await response.json();
+    if (version !== chatState.restoreVersion) return;
+    chatState.conversationId = stored;
+    chatState.messages = rows.map((row) => ({
+      id: row.id,
+      role: row.role === 'user' ? 'user' : 'assistant',
+      parts: partsFromChatSegments(row.meta?.segments, row.content),
+    }));
+  } catch (error) {
+    if (version !== chatState.restoreVersion) return;
+    if (error instanceof TypeError) return;
+    chatState.conversationId = null;
+    chatState.messages = [];
+  }
+  renderChatMessages();
+}
+
+function resetChatConversation() {
+  chatState.controller?.abort();
+  chatState.controller = null;
+  chatState.restoreVersion += 1;
+  chatState.conversationId = null;
+  chatState.messages = [];
+  localStorage.removeItem(chatStorageKey());
+  setChatStreaming(false);
+  renderChatMessages();
+  document.getElementById('chat-input').focus();
+}
+
+function updateChatContext() {
+  const nextIdentity = chatIdentityKey();
+  document.getElementById('chat-identity').textContent = selectedMerchant
+    ? (selectedMerchant.tradeName || selectedMerchant.legalName)
+    : 'Invitado';
+  if (chatState.identityKey === nextIdentity) {
+    renderChatMessages();
+    return;
+  }
+  chatState.controller?.abort();
+  chatState.controller = null;
+  clearPendingChatImages();
+  chatState.identityKey = nextIdentity;
+  chatState.conversationId = null;
+  chatState.messages = [];
+  setChatStreaming(false);
+  renderChatMessages();
+  void restoreChatConversation();
+}
+
+async function addChatFiles(files) {
+  if (chatState.isReadingFiles) {
+    setChatAttachmentError('Espera a que terminen de cargar las imágenes actuales.');
+    return;
+  }
+  const room = CHAT_MAX_IMAGES - chatState.pendingImages.length;
+  if (room <= 0) {
+    setChatAttachmentError(`Puedes adjuntar hasta ${CHAT_MAX_IMAGES} imágenes.`);
+    return;
+  }
+  const accepted = files.filter((file) => CHAT_MEDIA_TYPES.has(file.type) && file.size <= CHAT_MAX_IMAGE_BYTES).slice(0, room);
+  if (accepted.length < files.length) {
+    setChatAttachmentError('Algunas imágenes se omitieron (máximo 4, formato no compatible o más de 5 MB).');
+  } else {
+    setChatAttachmentError('');
+  }
+  const attachmentVersion = chatState.attachmentVersion;
+  chatState.isReadingFiles = true;
+  document.getElementById('chat-attach').disabled = true;
+  updateChatSendButton();
+  let images = [];
+  try {
+    const data = await Promise.all(accepted.map((file) => readChatFile(file)));
+    images = accepted.map((file, index) => ({
+      mediaType: file.type,
+      data: data[index],
+      previewUrl: URL.createObjectURL(file),
+    }));
+    if (attachmentVersion !== chatState.attachmentVersion) {
+      images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+      return;
+    }
+    chatState.pendingImages.push(...images);
+  } catch {
+    images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+    setChatAttachmentError('No se pudieron leer las imágenes.');
+  } finally {
+    if (attachmentVersion === chatState.attachmentVersion) {
+      chatState.isReadingFiles = false;
+      renderChatPreviews();
+      updateChatSendButton();
+    }
+  }
+}
+
+function readChatFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',').at(-1));
+    reader.onerror = () => reject(reader.error || new Error('No se pudo leer la imagen.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderChatPreviews() {
+  const container = document.getElementById('chat-previews');
+  container.classList.toggle('has-images', chatState.pendingImages.length > 0);
+  container.replaceChildren();
+  chatState.pendingImages.forEach((image, index) => {
+    const preview = document.createElement('div');
+    preview.className = 'chat-preview';
+    const img = document.createElement('img');
+    img.src = image.previewUrl;
+    img.alt = 'Imagen adjunta';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'chat-remove-image';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', 'Quitar imagen');
+    remove.addEventListener('click', () => {
+      URL.revokeObjectURL(chatState.pendingImages[index].previewUrl);
+      chatState.pendingImages.splice(index, 1);
+      renderChatPreviews();
+    });
+    preview.append(img, remove);
+    container.appendChild(preview);
+  });
+  document.getElementById('chat-attach').disabled = chatState.isStreaming || chatState.isReadingFiles || chatState.pendingImages.length >= CHAT_MAX_IMAGES;
+}
+
+function clearPendingChatImages() {
+  chatState.attachmentVersion += 1;
+  chatState.isReadingFiles = false;
+  chatState.pendingImages.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+  chatState.pendingImages = [];
+  renderChatPreviews();
+  setChatAttachmentError('');
+}
+
+function setChatAttachmentError(message) {
+  const error = document.getElementById('chat-attachment-error');
+  error.textContent = message;
+  error.style.display = message ? 'block' : 'none';
+}
+
+function initChatWidget() {
+  const input = document.getElementById('chat-input');
+  const files = document.getElementById('chat-files');
+  document.getElementById('chat-new').addEventListener('click', resetChatConversation);
+  document.getElementById('chat-attach').addEventListener('click', () => files.click());
+  document.getElementById('chat-send').addEventListener('click', () => sendChatMessage(input.value));
+  document.getElementById('chat-stop').addEventListener('click', () => chatState.controller?.abort());
+  files.addEventListener('change', () => {
+    void addChatFiles(Array.from(files.files || []));
+    files.value = '';
+  });
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight, 176)}px`;
+    updateChatSendButton();
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void sendChatMessage(input.value);
+    }
+  });
+  input.addEventListener('paste', (event) => {
+    const pasted = Array.from(event.clipboardData?.items || [])
+      .filter((item) => item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    if (pasted.length) {
+      event.preventDefault();
+      void addChatFiles(pasted);
+    }
+  });
+  renderChatMessages();
+  setChatStreaming(false);
+  void restoreChatConversation();
+}
+
+function toggleChat() {
+  chatOpen = !chatOpen;
+  const panel = document.getElementById('chat-panel');
+  const iconOpen = document.getElementById('chat-icon-open');
+  const iconClose = document.getElementById('chat-icon-close');
+  const launcher = document.getElementById('chat-launcher');
+
+  if (chatOpen) {
+    panel.classList.add('chat-visible');
+    panel.setAttribute('aria-hidden', 'false');
+    iconOpen.style.display = 'none';
+    iconClose.style.display = 'block';
+    launcher.style.background = '#181919';
+    launcher.setAttribute('aria-label', 'Cerrar soporte al aliado');
+    launcher.setAttribute('aria-expanded', 'true');
+    setTimeout(() => document.getElementById('chat-input').focus(), 0);
+  } else {
+    panel.classList.remove('chat-visible');
+    panel.setAttribute('aria-hidden', 'true');
+    iconOpen.style.display = 'block';
+    iconClose.style.display = 'none';
+    launcher.style.background = '#FFDE54';
+    launcher.setAttribute('aria-label', 'Abrir soporte al aliado');
+    launcher.setAttribute('aria-expanded', 'false');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Boot
+// ════════════════════════════════════════════════════════════════════
+initChatWidget();
+renderSelector();
+</script>
+</body>
+</html>
