@@ -24,67 +24,17 @@ from anthropic import APIError
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from agent.tools import build_merchant_registry, build_registry
 from service import SERVICE_NAME, __version__
 from service.api.errors import handle_provider_error
 from service.api.health import router as health_router
 from service.api.v1.router import router as v1_router
-from service.core.agent import (
-    build_database,
-    build_embedder,
-    build_service_agent,
-)
+from service.core.agent import build_database, build_embedder
 from service.core.config import Settings, get_settings
 from service.core.limits import MaxBodySizeMiddleware
 from service.core.llm import build_anthropic_client
 from service.core.migrations import upgrade_to_head
-from service.core.tooling import build_bnpl_client, build_merchant_client
+from service.core.profiles import build_profile_runtimes
 from service.worker import router as worker_router
-
-# ── Merchant persona ──
-# The buyer ("Cheo") soul is a constant in agent/runtime/session.py. The
-# merchant soul lives here so the merchant persona can evolve alongside the
-# merchant tools without touching the brain-side session module.
-MERCHANT_SOUL = """\
-You are Cheo, a customer-support agent for Cashea's merchant partners (aliados).
-You help merchants with their orders, payments, conciliation, payouts, invoices,
-2FA setup, promotions, and account issues. You are concise, professional, and
-proactive — aliados are business owners, not end consumers.
-
-How you work:
-- When the host portal has already identified the merchant, use merchant-scoped
-  tools directly without asking again for their RIF or business name. Identity
-  is established only through the portal, never by collecting identifiers in
-  chat. When no merchant is identified, merchant-scoped tools are unavailable:
-  answer general questions only, and for any account-specific request ask the
-  visitor to select their commerce in the portal first. Do not ask an anonymous
-  visitor for a RIF, order number, store, or employee id.
-- Ground every answer in your tools. Never invent order numbers, amounts,
-  statuses, or account details — look them up. If you're missing an identifier
-  (RIF, order number, store name), ask for it.
-- Relay tool results honestly. Amounts from the merchant API are in **cents**
-  (divide by 100 for the dollar value). Some amounts have a VES equivalent
-  (amountVES) — present both when relevant.
-- Order numbers are 9-digit numbers (e.g. 197688580), NOT prefixed ids.
-- When a merchant asks about a payout/transfer, check the payout endpoint for
-  the period in question. Payouts have statuses: PENDING (not yet sent),
-  SENT (deposited, with bankReference), FAILED.
-- For 2FA issues: check if the employee has phoneRegistered=true. If not,
-  guide them to register. If the phone is already registered, tell them —
-  there's nothing to change.
-- For cancellations: ADMIN can cancel any order in a cancellable status.
-  MANAGER (Gerente) can only cancel same-day orders from their store and needs
-  a security code. CASHIER cannot cancel.
-  Communicate these rules clearly.
-- When you cannot resolve something (a manual adjustment, a dispute that needs
-  human review), call escalate_to_human and tell the merchant plainly.
-- Never mention tools, systems, or your own limitations mechanically — just
-  say plainly what you can or cannot do.
-- You can see images the merchant attaches (screenshots, receipts) — describe
-  what's relevant, but verify with a tool before acting on claims.
-
-Your tools' descriptions say what each one does and when to use it.
-"""
 
 
 def _configure_logging(settings: Settings) -> None:
@@ -136,41 +86,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Build the LLM client once and reuse it — a per-request client would leak
     # connections. Routes reach it via the get_llm_client dependency.
     app.state.llm = build_anthropic_client(settings)
-    app.state.bnpl = build_bnpl_client(settings)
-    app.state.merchant_client = build_merchant_client(settings)
-    # Durable stores for memory & sessions (pooled) — built before the registry
+    # Durable stores for memory & sessions (pooled) — built before the registries
     # since manage_memory (agent/tools/implementations/memory.py) needs it.
     app.state.db = build_database(settings)
-    # Assemble the tool registries once, each bound to its process-wide client.
-    app.state.registry = build_registry(app.state.bnpl, app.state.db)
-    app.state.merchant_registry = build_merchant_registry(
-        app.state.merchant_client, app.state.db
-    )
-    # The assembled Agents — the brains the request path calls. Built once;
-    # nothing conversation-specific lives on them. ``get_agent`` selects
-    # between them based on the X-Agent-Profile header.
     app.state.embedder = build_embedder(settings)
-    app.state.agent = build_service_agent(
+    # One backend client, tool registry and Agent per registered profile
+    # (agent/profiles/). Adding a profile changes nothing here.
+    app.state.profiles = build_profile_runtimes(
         settings,
-        client=app.state.llm,
+        llm=app.state.llm,
         db=app.state.db,
-        tools=app.state.registry,
         embedder=app.state.embedder,
     )
-    app.state.merchant_agent = build_service_agent(
-        settings,
-        client=app.state.llm,
-        db=app.state.db,
-        tools=app.state.merchant_registry,
-        embedder=app.state.embedder,
-        soul=MERCHANT_SOUL,
-    )
+    log.info("profiles.ready", profiles=sorted(app.state.profiles))
     try:
         yield
     finally:
         await app.state.llm.close()
-        await app.state.bnpl.aclose()
-        await app.state.merchant_client.aclose()
+        for runtime in app.state.profiles.values():
+            await runtime.client.aclose()
         await app.state.embedder.aclose()
         await app.state.db.dispose()
         log.info("service.stop", service=SERVICE_NAME)

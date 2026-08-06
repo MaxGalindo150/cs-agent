@@ -10,14 +10,23 @@ values into ``build_agent`` (CLAUDE.md §4), so nothing under ``agent/`` ever se
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
+
 from anthropic import AsyncAnthropic
 from fastapi import Request
 
 from agent.app import Agent, build_agent
 from agent.memory.db import Database, DatabaseConfig
 from agent.memory.embeddings import Embedder, VoyageEmbedder
+from agent.profiles import get_profile
 from agent.tools.registry import ToolRegistry
 from service.core.config import Settings
+
+if TYPE_CHECKING:
+    # Import-time only: service/core/profiles.py imports the builders from this
+    # module, so a runtime import here would be a cycle.
+    from service.core.profiles import ProfileRuntime
 
 
 def build_database(settings: Settings) -> Database:
@@ -59,17 +68,14 @@ def build_service_agent(
 
 
 def get_agent(request: Request) -> Agent:
-    """Dependency: the process-wide Agent assembled at startup.
+    """Dependency: the Agent for the profile this request asks for.
 
-    Selects between the buyer and merchant agents based on the
-    ``X-Agent-Profile`` header (default: buyer).
+    One Agent per registered profile is assembled at startup; the
+    ``X-Agent-Profile`` header picks one (unknown or absent → the default
+    profile). Adding a profile does not touch this function.
     """
-    profile = request.headers.get("X-Agent-Profile", "buyer")
-    if profile == "merchant":
-        agent: Agent = request.app.state.merchant_agent
-    else:
-        agent = request.app.state.agent
-    return agent
+    runtimes: Mapping[str, ProfileRuntime] = request.app.state.profiles
+    return runtimes[get_profile(request.headers.get("X-Agent-Profile")).name].agent
 
 
 def get_database(request: Request) -> Database:
