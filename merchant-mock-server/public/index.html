@@ -8,8 +8,17 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+  <!-- Pinned with Subresource Integrity: DOMPurify is what sanitizes assistant
+       Markdown before it reaches innerHTML, so a CDN serving modified code would
+       silently disable that. marked is pinned for the same reason (it produces
+       the HTML DOMPurify then cleans). The Tailwind CDN build has no versioned
+       URL to pin — it is dev-only styling and touches no untrusted input. -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
+    integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+"
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"
+    integrity="sha384-JEyTNhjM6R1ElGoJns4U2Ln4ofPcqzSsynQkmEc/KGy6336qAZl70tDLufbkla+3"
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>
     // Cashea palette + shadows, copied verbatim from merchant-web/tailwind.config.js
     // so the mock portal matches the real aliado portal. Only the scales used by
@@ -346,15 +355,6 @@ async function api(path) {
   return res.json();
 }
 
-async function apiSearch(path) {
-  const res = await fetch(`${API}${path}`);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw Object.assign(new Error(body.error || 'Error'), { status: res.status, body });
-  }
-  return res.json();
-}
-
 // ════════════════════════════════════════════════════════════════════
 // Formatters
 // ════════════════════════════════════════════════════════════════════
@@ -439,7 +439,7 @@ async function loadMerchants(query) {
   if (!listEl) return;
   listEl.innerHTML = spinner();
   const q = query ? `?search=${encodeURIComponent(query)}&limit=20` : '?limit=20';
-  const res = await apiSearch(`/merchants${q}`);
+  const res = await api(`/merchants${q}`);
   if (!res.data || res.data.length === 0) {
     listEl.innerHTML = '<p class="text-center text-cashea-gray-16 py-8">No se encontraron comercios</p>';
     return;
@@ -633,10 +633,10 @@ async function viewResumen() {
   c.innerHTML = spinner();
 
   const [stores, ordersRes, payouts, invoices] = await Promise.all([
-    apiSearch(`/merchants/${m.id}/stores`),
-    apiSearch(`/orders?merchantId=${m.id}&limit=5`),
-    apiSearch(`/merchants/${m.id}/payouts`),
-    apiSearch(`/merchants/${m.id}/invoices`),
+    api(`/merchants/${m.id}/stores`),
+    api(`/orders?merchantId=${m.id}&limit=5`),
+    api(`/merchants/${m.id}/payouts`),
+    api(`/merchants/${m.id}/invoices`),
   ]);
 
   const pendingPayouts = (payouts.data || []).filter(p => p.status === 'PENDING').length;
@@ -733,7 +733,7 @@ async function reloadOrders() {
   tableEl.innerHTML = spinner();
 
   const q = `?merchantId=${selectedMerchant.id}&page=${ordersPage}&limit=15${status ? `&status=${status}` : ''}`;
-  const res = await apiSearch(`/orders${q}`);
+  const res = await api(`/orders${q}`);
   const orders = res.data || [];
 
   tableEl.innerHTML = `
@@ -783,7 +783,7 @@ async function showOrderDetail(orderNumber) {
   c.innerHTML = spinner();
   const [order, installments] = await Promise.all([
     api(`/orders/${orderNumber}`),
-    apiSearch(`/orders/${orderNumber}/installments`),
+    api(`/orders/${orderNumber}/installments`),
   ]);
 
   c.innerHTML = `
@@ -863,7 +863,7 @@ async function showOrderDetail(orderNumber) {
 // ── Conciliación ───────────────────────────────────────────────────
 async function viewConciliation() {
   const c = document.getElementById('content');
-  const storesRes = await apiSearch(`/merchants/${selectedMerchant.id}/stores`);
+  const storesRes = await api(`/merchants/${selectedMerchant.id}/stores`);
   const stores = storesRes.data || [];
   if (stores.length === 0) {
     c.innerHTML = '<p class="text-cashea-gray-16">Sin tiendas</p>';
@@ -892,7 +892,7 @@ async function loadConcDetail() {
   const el = document.getElementById('conc-detail');
   if (!el) return;
   el.innerHTML = spinner();
-  const res = await apiSearch(`/stores/${currentStoreUuid}/daily-conciliation/history?limit=15`);
+  const res = await api(`/stores/${currentStoreUuid}/daily-conciliation/history?limit=15`);
   const concs = res.data || [];
   if (concs.length === 0) {
     el.innerHTML = '<p class="text-cashea-gray-16 py-4">Sin conciliaciones</p>';
@@ -940,7 +940,7 @@ async function loadConcDetail() {
 async function viewMonthly() {
   const c = document.getElementById('content');
   c.innerHTML = spinner();
-  const res = await apiSearch(`/merchants/${selectedMerchant.id}/monthly-reports`);
+  const res = await api(`/merchants/${selectedMerchant.id}/monthly-reports`);
   const reports = res.data || [];
   if (reports.length === 0) {
     c.innerHTML = '<p class="text-cashea-gray-16">Sin reportes mensuales</p>';
@@ -997,7 +997,7 @@ async function viewMonthly() {
 async function viewPayouts() {
   const c = document.getElementById('content');
   c.innerHTML = spinner();
-  const res = await apiSearch(`/merchants/${selectedMerchant.id}/payouts`);
+  const res = await api(`/merchants/${selectedMerchant.id}/payouts`);
   const payouts = res.data || [];
   c.innerHTML = `
     <h2 class="text-xl font-bold mb-4">Transferencias (Payouts)</h2>
@@ -1037,7 +1037,7 @@ async function viewPayouts() {
 async function viewInvoices() {
   const c = document.getElementById('content');
   c.innerHTML = spinner();
-  const res = await apiSearch(`/merchants/${selectedMerchant.id}/invoices`);
+  const res = await api(`/merchants/${selectedMerchant.id}/invoices`);
   const invoices = res.data || [];
   c.innerHTML = `
     <h2 class="text-xl font-bold mb-4">Facturas</h2>
@@ -1069,7 +1069,7 @@ async function viewInvoices() {
 async function viewEmployees() {
   const c = document.getElementById('content');
   c.innerHTML = spinner();
-  const res = await apiSearch(`/merchants/${selectedMerchant.id}/employees`);
+  const res = await api(`/merchants/${selectedMerchant.id}/employees`);
   const employees = res.data || [];
   c.innerHTML = `
     <h2 class="text-xl font-bold mb-4">Empleados</h2>
@@ -1100,7 +1100,7 @@ async function viewEmployees() {
 async function viewPromotions() {
   const c = document.getElementById('content');
   c.innerHTML = spinner();
-  const res = await apiSearch(`/merchants/${selectedMerchant.id}/promotions`);
+  const res = await api(`/merchants/${selectedMerchant.id}/promotions`);
   const promos = res.data || [];
   c.innerHTML = `
     <h2 class="text-xl font-bold mb-4">Promociones</h2>
@@ -1134,7 +1134,7 @@ async function viewPromotions() {
 async function viewStores() {
   const c = document.getElementById('content');
   c.innerHTML = spinner();
-  const res = await apiSearch(`/merchants/${selectedMerchant.id}/stores`);
+  const res = await api(`/merchants/${selectedMerchant.id}/stores`);
   const stores = res.data || [];
   c.innerHTML = `
     <h2 class="text-xl font-bold mb-4">Tiendas</h2>
@@ -1162,7 +1162,7 @@ async function viewStores() {
 async function viewScenarios() {
   const c = document.getElementById('content');
   c.innerHTML = spinner();
-  const res = await apiSearch(`/scenarios`);
+  const res = await api(`/scenarios`);
   const scenarios = res.data || [];
   c.innerHTML = `
     <h2 class="text-xl font-bold mb-1">Catálogo de Escenarios</h2>

@@ -208,7 +208,6 @@ orderRoutes.post("/:orderNumber/cancel", async (c) => {
     reason: reason.reason,
     cancelledAt: new Date().toISOString(),
   };
-  order.scenarioTags = [...new Set([...order.scenarioTags])];
 
   // Cancelar cuotas
   const db = getDB();

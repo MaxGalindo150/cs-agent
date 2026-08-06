@@ -30,7 +30,9 @@ import { runSeed } from "./seed/seed.js";
 console.log("🌱 Seeding database...");
 runSeed();
 
-const PORT = 3002;
+// 3002 por defecto (lo que espera docker-compose y el agent-service); PORT
+// permite una segunda instancia o esquivar un choque de puertos local.
+const PORT = Number.parseInt(process.env.PORT ?? "", 10) || 3002;
 
 const app = new Hono();
 

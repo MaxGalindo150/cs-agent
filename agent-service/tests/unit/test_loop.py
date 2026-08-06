@@ -15,7 +15,7 @@ import anthropic
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 
 from agent.identity import Principal
-from agent.loop.agent import LoopResult, run_loop
+from agent.loop.agent import LoopResult, _safe_args, run_loop
 from agent.tools.context import ToolContext
 from agent.tools.registry import Tool, ToolRegistry
 
@@ -746,3 +746,28 @@ async def test_streaming_failure_falls_back_to_create() -> None:
     assert client.messages.create_calls == 1
     # The hiccup must be observable, not swallowed silently.
     assert any(kind == "stream_error" for kind, _ in events)
+
+
+def test_redaction_ignores_key_casing_and_separators() -> None:
+    """Redaction must not depend on how a schema author capitalized the key: a
+    tool declaring `Phone` or `security-code` would otherwise leak into traces
+    and the persisted turn tail with no sign anything was missed."""
+    redacted = _safe_args(
+        {
+            "Phone": "+58 412 123 4567",
+            "security-code": "123456",
+            "API_KEY": "sk-live",
+            "Authorization": "Bearer x",
+            "orderNumber": "197000001",
+            "nested": [{"securityCode": "654321"}],
+        }
+    )
+
+    assert redacted == {
+        "Phone": "[REDACTED]",
+        "security-code": "[REDACTED]",
+        "API_KEY": "[REDACTED]",
+        "Authorization": "[REDACTED]",
+        "orderNumber": "197000001",
+        "nested": [{"securityCode": "[REDACTED]"}],
+    }

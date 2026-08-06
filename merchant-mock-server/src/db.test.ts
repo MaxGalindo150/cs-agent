@@ -15,6 +15,8 @@ describe("database helpers", () => {
     getDB().merchants.set(1, { id: 1, uuid: "merchant-1" } as Merchant);
 
     expect(findMerchant("1")?.id).toBe(1);
+    expect(findMerchant(1)?.id).toBe(1);
+    expect(findMerchant("merchant-1")?.id).toBe(1);
     expect(findMerchant("1abc")).toBeUndefined();
   });
 

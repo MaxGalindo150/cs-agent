@@ -39,27 +39,32 @@ from agent.observability import LoopEvent, Observer
 from agent.tools.context import ToolContext
 from agent.tools.registry import ToolRegistry
 
+# Compared case- and separator-insensitively (see _is_sensitive), so one entry
+# covers `phone`, `Phone` and `phone_number`-style casing differences across
+# tool schemas. Redaction must not depend on a schema author's capitalization.
 _SENSITIVE_ARG_KEYS = frozenset(
     {
-        "apiKey",
-        "api_key",
+        "apikey",
         "authorization",
         "code",
         "email",
         "password",
         "phone",
-        "securityCode",
-        "security_code",
+        "securitycode",
         "token",
     }
 )
+
+
+def _is_sensitive(key: str) -> bool:
+    return key.lower().replace("_", "").replace("-", "") in _SENSITIVE_ARG_KEYS
 
 
 def _safe_args(value: Any) -> Any:
     """Redact credentials/PII before tool args reach observers or persistence."""
     if isinstance(value, dict):
         return {
-            key: "[REDACTED]" if key in _SENSITIVE_ARG_KEYS else _safe_args(item)
+            key: "[REDACTED]" if _is_sensitive(key) else _safe_args(item)
             for key, item in value.items()
         }
     if isinstance(value, list):
