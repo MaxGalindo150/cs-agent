@@ -42,6 +42,7 @@ def build_service_agent(
     db: Database,
     tools: ToolRegistry,
     embedder: Embedder | None,
+    soul: str = "",
 ) -> Agent:
     """Assemble the Agent from process-wide parts via the brain-side factory."""
     return build_agent(
@@ -53,12 +54,21 @@ def build_service_agent(
         trace_dir=settings.trace_dir,
         otel_endpoint=settings.otel_endpoint or None,
         embedder=embedder,
+        soul=soul,
     )
 
 
 def get_agent(request: Request) -> Agent:
-    """Dependency: the process-wide Agent assembled at startup."""
-    agent: Agent = request.app.state.agent
+    """Dependency: the process-wide Agent assembled at startup.
+
+    Selects between the buyer and merchant agents based on the
+    ``X-Agent-Profile`` header (default: buyer).
+    """
+    profile = request.headers.get("X-Agent-Profile", "buyer")
+    if profile == "merchant":
+        agent: Agent = request.app.state.merchant_agent
+    else:
+        agent = request.app.state.agent
     return agent
 
 

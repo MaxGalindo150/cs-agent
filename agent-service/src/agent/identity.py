@@ -20,3 +20,12 @@ from dataclasses import dataclass
 class Principal:
     user_id: str
     email: str | None = None
+    # ── Merchant profile (None for the buyer profile) ──
+    # The merchant principal is a triplet: merchant (RIF) → store → employee.
+    # ``profile`` distinguishes buyer from merchant so the wiring layer can
+    # select the right agent + toolset without inspecting individual fields.
+    profile: str = "buyer"  # "buyer" | "merchant"
+    merchant_id: str | None = None
+    store_uuid: str | None = None
+    employee_id: str | None = None
+    role: str | None = None  # ADMIN | MANAGER | CASHIER

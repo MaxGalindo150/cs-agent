@@ -244,12 +244,14 @@ class Agent:
         tools: ToolRegistry,
         tracer: Tracer,
         config: AgentConfig,
+        soul: str = "",
     ) -> None:
         self._client = client
         self._memory = memory
         self._tools = tools
         self._tracer = tracer
         self._config = config
+        self._soul = soul  # persona constant; defaults to buyer soul if empty
 
     async def start_session(
         self, title: str | None = None, principal: Principal | None = None
@@ -333,7 +335,7 @@ class Agent:
             # conversation's recent history from Postgres before assembling the
             # prompt. Discarded when the turn ends — nothing conversation-specific
             # lives in the process between requests (CLAUDE.md §9).
-            session = Session(session_id, memory=self._memory)
+            session = Session(session_id, memory=self._memory, soul=self._soul)
             await session.switch(session_id, self._config.history_turns)
 
             # A deterministic gate, checked before the LLM ever runs: once a
@@ -397,7 +399,9 @@ class Agent:
                 return LoopResult(reply=reply)
 
             user_id = principal.user_id if principal else None
-            system = await session.build_system(user_message, user_id, notify=notify)
+            system = await session.build_system(
+                user_message, user_id, notify=notify, principal=principal
+            )
 
             # session.history is list[dict]; the loop wants the SDK's MessageParam.
             # Cast at this boundary (as the loop casts its tool schemas) — the
@@ -605,7 +609,9 @@ class Agent:
         else:
             assert user_message is not None  # guaranteed by the guard above
             user_id = ctx.principal.user_id if ctx.principal else None
-            system = await session.build_system(user_message, user_id, notify=notify)
+            system = await session.build_system(
+                user_message, user_id, notify=notify, principal=ctx.principal
+            )
             resolution_text = user_message
 
         baseline = cast("list[MessageParam]", session.history[:-2] + state.turn_tail)
@@ -715,6 +721,7 @@ def build_agent(
     max_tokens: int = 2048,
     history_turns: int = 12,
     provider: str = "anthropic",
+    soul: str = "",
 ) -> Agent:
     """Assemble an ``Agent`` from its parts — the single place ``Memory`` +
     ``Tracer`` + ``Agent`` are wired together, shared by the transport lifespan
@@ -741,4 +748,5 @@ def build_agent(
             history_turns=history_turns,
             provider=provider,
         ),
+        soul=soul,
     )

@@ -19,6 +19,11 @@ def build_bnpl_client(settings: Settings) -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url=settings.bnpl_api_url, timeout=10.0)
 
 
+def build_merchant_client(settings: Settings) -> httpx.AsyncClient:
+    """Process-wide HTTP client for the merchant backend (base URL from config)."""
+    return httpx.AsyncClient(base_url=settings.merchant_api_url, timeout=10.0)
+
+
 def get_registry(request: Request) -> ToolRegistry:
     """Dependency: the tool registry assembled at startup."""
     registry: ToolRegistry = request.app.state.registry

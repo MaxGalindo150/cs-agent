@@ -18,13 +18,11 @@ deployment that omits `ENVIRONMENT` fails closed, not open).
 and now a persisted `chat_sessions.user_id` row (ADR-0002) — to *any* user id
 just by setting the header. Impersonation is trivial in dev.
 
-**Blast radius today:** bounded. Nothing currently *reads* `user_id` to
-authorize access — it is write-only attribution data (which conversation
-"belongs" to whom, or which fact/episode is about whom — `facts.user_id` /
-`episodes.user_id`), not yet an access-control gate. It graduates from
-"corrupted ownership data" to "real access-control bypass" the moment
-something scopes a *read* by trusting this value — e.g. a "list my
-sessions" endpoint, or semantic-memory retrieval filtered by `user_id`.
+**Blast radius today:** bounded to fake development data. Buyer and merchant
+tools use the asserted principal to scope reads and reject cross-user/entity
+lookups, but every backing service is a local mock with generated records.
+Because the header remains forgeable, these checks prevent accidental
+cross-account access in demos; they are not production authorization.
 
 **Accepted because:** this is an explicit, temporary stub (see the
 docstring in `service/core/identity.py`), built to simulate per-user
@@ -36,9 +34,9 @@ subject claim from a verified bearer token instead of trusting a header).
 Its shape (`-> Principal | None`) does not change, so no caller — `agent/`,
 `chat.py`, `chat_stream.py` — needs to change when this happens.
 
-**Until then:** do not build authorization (session-ownership checks,
-per-user data filtering) on the assumption that `Principal`/`user_id` is a
-verified identity. See item 2.
+**Until then:** treat principal-based scoping as a demo harness only. Do not
+connect sensitive or production data, and do not describe these checks as real
+authorization. See item 2.
 
 ---
 

@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from agent.identity import Principal
 from agent.observability import LoopEvent, Observer
 
 DEFAULT_SOUL = """\
@@ -61,13 +62,20 @@ class Session:
     """Holds one conversation: the chat history plus the recipe for the system
     prompt. One Session per gateway connection."""
 
-    def __init__(self, session_id: uuid.UUID, memory: Any = None) -> None:
+    def __init__(
+        self, session_id: uuid.UUID, memory: Any = None, soul: str = ""
+    ) -> None:
         # session_id is a real chat_sessions PK (created up front), not Waku's
         # free-string tag — chat_messages FKs to it. Required and first: a UUID
         # has no literal default, and a required arg can't follow `memory=None`.
         self.session_id = session_id
         self.memory = memory  # agent.memory.Memory (None until it's wired)
         self.history: list[dict[str, Any]] = []
+        # The persona this session runs with — passed by the Agent so different
+        # profiles (buyer vs merchant) can coexist without load_soul being
+        # profile-aware. Empty default falls back to the buyer soul (backward
+        # compat for tests that build a bare Session).
+        self._soul = soul or DEFAULT_SOUL
 
     async def fixed_response(self, user_message: str) -> str | None:
         """A canned reply that must bypass the LLM entirely, or ``None`` if
@@ -94,14 +102,53 @@ class Session:
         user_message: str,
         user_id: str | None = None,
         notify: Observer | None = None,
+        principal: Principal | None = None,
     ) -> str:
         # The service should know the request-handling clock so the model can
         # resolve relative dates ("ayer", "en 30 minutos"). TODO: timezone via env.
         now = datetime.now().astimezone()
         parts = [
-            load_soul(),
+            self._soul,
             f"\nRight now it is {now:%A, %Y-%m-%d %H:%M} ({now:%Z}, UTC{now:%z}).",
         ]
+
+        # Tell the model whether the host app already identified the caller,
+        # without injecting raw header values into the system prompt. ToolContext
+        # carries the actual ids; the model only needs to know it should use the
+        # scoped tools instead of asking the caller to identify themselves again.
+        if principal is None:
+            parts.append(
+                "\nCurrent caller context (provided by the host application):\n"
+                "- No caller is identified. Identity-scoped tools are unavailable.\n"
+                "- For account-specific requests, do not ask for account identifiers "
+                "and do not offer a lookup. Tell the caller to identify themselves "
+                "through the host application first. You may still answer general "
+                "questions."
+            )
+        else:
+            if principal.profile == "merchant":
+                employee_context = (
+                    "An employee is also identified for employee-specific actions."
+                    if principal.employee_id
+                    else (
+                        "No employee is identified; ask for one only when the task "
+                        "requires it."
+                    )
+                )
+                parts.append(
+                    "\nCurrent caller context (provided by the host application):\n"
+                    "- A merchant is already identified. Do not ask for their RIF or "
+                    "business name merely to identify them.\n"
+                    "- Merchant-scoped tools receive the merchant identity from the "
+                    "harness. Never ask for or pass a merchant_id in tool calls.\n"
+                    f"- {employee_context}"
+                )
+            else:
+                parts.append(
+                    "\nCurrent caller context (provided by the host application):\n"
+                    "- A customer is already identified. Identity-scoped tools receive "
+                    "that identity from the harness; do not ask for their user id."
+                )
 
         if self.memory is not None:
             # Hero moment #1: a cheap judge decides IF we retrieve at all —
