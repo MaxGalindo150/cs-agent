@@ -49,8 +49,33 @@ cs-agent/
 
 ## Quickstart
 
+### Prerequisites
+
+- Docker Desktop running (includes Docker Compose).
+- Anthropic and Voyage API keys for the agent.
+
+Create the local agent configuration once:
+
+```bash
+cp agent-service/.env.example agent-service/.env
+```
+
+Set `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` in `agent-service/.env`. This file
+is git-ignored; never commit its values.
+
+### Start full merchant stack
+
+From the repository root, start the frontend, merchant backend, agent, and
+their dependencies:
+
 ```bash
 docker compose up --build
+```
+
+For background execution:
+
+```bash
+docker compose up --build --detach
 ```
 
 | Service         | URL                            | What it is                          |
@@ -61,6 +86,18 @@ docker compose up --build
 | `merchant-mock-server` | http://localhost:3002    | Merchant (aliado) backend            |
 | `phoenix`       | http://localhost:6006           | OTel trace viewer (local dev)        |
 | `postgres`      | localhost:5433                  | agent memory & sessions              |
+
+Use http://localhost:3002 for the merchant dashboard and its mock API. The
+agent reaches it through the compose network; the frontend reaches the agent
+at http://localhost:8000.
+
+### Check, logs, and stop
+
+```bash
+docker compose ps
+docker compose logs --follow frontend agent-service merchant-mock-server
+docker compose down
+```
 
 Source is bind-mounted for both dev servers — no rebuild needed after a code
 change, only after a manifest changes (`pyproject.toml`/`uv.lock`,
