@@ -1,0 +1,39 @@
+// Who the chat is talking as, from agent-service's point of view.
+//
+// Each surface supplies its own: the demo page sends its simulated user as
+// X-User-* headers (dev only on the server), the embedded widget sends a
+// session token obtained from the host app (lib/host/). Everything that calls
+// agent-service goes through `authedFetch`, so neither the API client nor the
+// hooks know which one is in use.
+
+export interface ChatAuth {
+  /** Headers that identify the caller. May do network work (renewing a
+   *  token), so it is async; an empty object means anonymous. */
+  headers(): Promise<Record<string, string>>;
+  /** Drop any cached credential after a 401, so the next `headers()` renews. */
+  invalidate?(): void;
+}
+
+/** fetch with the caller's identity attached. On a 401 it invalidates the
+ *  credential and retries once — an expired session token renews transparently. */
+export async function authedFetch(
+  url: string,
+  init: RequestInit = {},
+  auth?: ChatAuth,
+): Promise<Response> {
+  const send = async () =>
+    fetch(url, { ...init, headers: { ...init.headers, ...(await auth?.headers()) } });
+
+  const res = await send();
+  if (res.status !== 401 || !auth?.invalidate) return res;
+  auth.invalidate();
+  return send();
+}
+
+/** The demo page's simulated login (lib/identity/), trusted by agent-service
+ *  only in dev. */
+export function demoUserAuth(user: { id: string; email?: string }): ChatAuth {
+  const headers: Record<string, string> = { "X-User-Id": user.id };
+  if (user.email) headers["X-User-Email"] = user.email;
+  return { headers: async () => headers };
+}

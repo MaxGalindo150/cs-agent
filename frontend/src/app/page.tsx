@@ -1,6 +1,7 @@
 import { AccountDashboard } from "@/components/dashboard/account-dashboard";
 import { IdentityBar } from "@/components/identity/identity-bar";
 import { ChatWidget } from "@/components/widget/chat-widget";
+import { IdentityProvider } from "@/lib/identity/context";
 
 /**
  * Placeholder "host app" — stands in for whatever real product the support
@@ -12,14 +13,16 @@ import { ChatWidget } from "@/components/widget/chat-widget";
  */
 export default function Home() {
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
-      <IdentityBar />
+    <IdentityProvider>
+      <div className="flex h-full flex-col bg-background text-foreground">
+        <IdentityBar />
 
-      <div className="flex flex-1 items-center justify-center overflow-y-auto px-4 py-8">
-        <AccountDashboard />
+        <div className="flex flex-1 items-center justify-center overflow-y-auto px-4 py-8">
+          <AccountDashboard />
+        </div>
+
+        <ChatWidget />
       </div>
-
-      <ChatWidget />
-    </div>
+    </IdentityProvider>
   );
 }

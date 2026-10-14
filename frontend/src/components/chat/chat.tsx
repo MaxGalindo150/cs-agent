@@ -9,7 +9,7 @@ import { MessageList } from "@/components/chat/message-list";
 import { useChat } from "@/hooks/use-chat";
 import { useConversations } from "@/hooks/use-conversations";
 import { deleteConversation } from "@/lib/chat/api";
-import { useIdentity } from "@/lib/identity/context";
+import type { ChatAuth } from "@/lib/chat/auth";
 
 /** The words that change with who the chat is for. */
 export interface ChatCopy {
@@ -18,6 +18,19 @@ export interface ChatCopy {
   subtitle: string;
   suggestions: string[];
 }
+
+/** Who the chat is talking as. Supplied by the surface hosting it: the demo
+ *  page's simulated login, or the host app's identity in the embed. */
+export interface ChatIdentity {
+  /** Omit for an anonymous visitor. Must be stable across renders. */
+  auth?: ChatAuth;
+  /** Shown in the header, e.g. "Alice Johnson" or "Invitado". */
+  label: string;
+  /** Changes when a different person takes over; starts a fresh conversation. */
+  key: string | null;
+}
+
+const ANONYMOUS: ChatIdentity = { label: "Invitado", key: null };
 
 const DEFAULT_COPY: ChatCopy = {
   title: "Soporte Cashea",
@@ -37,37 +50,32 @@ interface ChatProps {
    * (default). "widget": embedded in the floating support bubble — no
    * sidebar (there's no room, and Tailwind's `sm:` breakpoint checks the
    * browser viewport, not this panel's own width, so it can't be hidden by
-   * CSS alone in a narrow container). Which conversations belong to an
-   * anonymous widget visitor isn't tracked yet (needs a cookie or similar) —
-   * hiding the sidebar sidesteps that for now rather than showing everyone's.
+   * CSS alone in a narrow container).
    */
   variant?: "page" | "widget";
   /** localStorage key for the active conversation — see UseChatOptions. */
   storageKey?: string;
   copy?: ChatCopy;
+  identity?: ChatIdentity;
 }
 
 /** Top-level chat screen: sidebar, header, scrollable transcript, and composer. */
-export function Chat({ variant = "page", storageKey, copy = DEFAULT_COPY }: ChatProps) {
+export function Chat({
+  variant = "page",
+  storageKey,
+  copy = DEFAULT_COPY,
+  identity = ANONYMOUS,
+}: ChatProps) {
   const isWidget = variant === "widget";
-  const { conversations, refresh } = useConversations();
-  const { activeUser } = useIdentity();
+  const { auth } = identity;
+  const { conversations, refresh } = useConversations(auth);
   const { messages, isStreaming, conversationId, send, sendChoice, stop, reset, load } =
-    useChat({
-      onConversationUpdate: refresh,
-      storageKey,
-      principal: activeUser
-        ? { userId: activeUser.id, email: activeUser.email }
-        : undefined,
-    });
+    useChat({ onConversationUpdate: refresh, storageKey, auth });
 
-  // Switching who's "logged in" starts a fresh conversation — continuing an
-  // existing thread under a different identity would be confusing (the
-  // session was minted under the previous one) and makes it easy to test the
-  // authenticated/anonymous branches cleanly, one at a time. Skip the first
-  // run: IdentityProvider restores the last logged-in user asynchronously
-  // after mount, and that initial hydration must not clobber the conversation
-  // useChat is simultaneously restoring from its own localStorage key.
+  // A different person taking over starts a fresh conversation — the old
+  // thread belongs to the previous identity, and agent-service would refuse
+  // to continue it anyway. Skip the mount run so it doesn't clobber the
+  // conversation useChat is restoring from localStorage.
   const skipFirstIdentityChange = useRef(true);
   useEffect(() => {
     if (skipFirstIdentityChange.current) {
@@ -75,12 +83,12 @@ export function Chat({ variant = "page", storageKey, copy = DEFAULT_COPY }: Chat
       return;
     }
     reset();
-  }, [activeUser?.id, reset]);
+  }, [identity.key, reset]);
 
   const handleDelete = useCallback(
     (id: string) => {
       if (!window.confirm("¿Eliminar esta conversación?")) return;
-      deleteConversation(id)
+      deleteConversation(id, auth)
         .then(() => {
           if (id === conversationId) reset();
           refresh();
@@ -89,7 +97,7 @@ export function Chat({ variant = "page", storageKey, copy = DEFAULT_COPY }: Chat
           // Non-fatal: leave the list as-is if the delete fails.
         });
     },
-    [conversationId, reset, refresh],
+    [conversationId, reset, refresh, auth],
   );
 
   return (
@@ -109,9 +117,7 @@ export function Chat({ variant = "page", storageKey, copy = DEFAULT_COPY }: Chat
           title={copy.title}
           onNewChat={reset}
           alwaysShowNewChat={isWidget}
-          identityLabel={
-            activeUser ? `${activeUser.firstName} ${activeUser.lastName}` : "Invitado"
-          }
+          identityLabel={identity.label}
         />
 
         <div className="flex-1 overflow-y-auto">

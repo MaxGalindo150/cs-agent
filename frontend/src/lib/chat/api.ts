@@ -29,6 +29,7 @@ import type {
   MessagePart,
   ToolEvent,
 } from "@/lib/chat/types";
+import { authedFetch, type ChatAuth } from "@/lib/chat/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -45,12 +46,8 @@ export interface StreamChatOptions {
   /** Images attached as context for this turn only — never replayed on later
    *  turns (see AttachedImage). */
   images?: AttachedImage[];
-  /**
-   * The simulated host-app identity (see lib/identity/), forwarded as
-   * X-User-Id/X-User-Email headers for agent-service's identity harness.
-   * Omit for an anonymous/guest visitor.
-   */
-  principal?: { userId: string; email?: string };
+  /** Who is sending (see lib/chat/auth.ts). Omit for an anonymous visitor. */
+  auth?: ChatAuth;
   /** Called for every text delta as it arrives. */
   onDelta: (delta: string) => void;
   /**
@@ -92,7 +89,7 @@ export async function streamChat({
   choiceId,
   conversationId,
   images,
-  principal,
+  auth,
   onDelta,
   onConversationId,
   onGate,
@@ -103,25 +100,25 @@ export async function streamChat({
   onNeedsHuman,
   signal,
 }: StreamChatOptions): Promise<void> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (principal?.userId) headers["X-User-Id"] = principal.userId;
-  if (principal?.email) headers["X-User-Email"] = principal.email;
-
-  const res = await fetch(`${API_URL}/v1/chat/stream`, {
-    method: "POST",
-    headers,
-    // `session_id: undefined` is dropped by JSON.stringify, so a new
-    // conversation sends just `{ message }` and the server mints an id.
-    // Exactly one of `message`/`choice_id` is sent — the server 422s if both
-    // or neither arrive (agent-service's ChatRequest validator).
-    body: JSON.stringify({
-      message,
-      choice_id: choiceId,
-      session_id: conversationId,
-      images: images?.map((img) => ({ media_type: img.mediaType, data: img.data })),
-    }),
-    signal,
-  });
+  const res = await authedFetch(
+    `${API_URL}/v1/chat/stream`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // `session_id: undefined` is dropped by JSON.stringify, so a new
+      // conversation sends just `{ message }` and the server mints an id.
+      // Exactly one of `message`/`choice_id` is sent — the server 422s if both
+      // or neither arrive (agent-service's ChatRequest validator).
+      body: JSON.stringify({
+        message,
+        choice_id: choiceId,
+        session_id: conversationId,
+        images: images?.map((img) => ({ media_type: img.mediaType, data: img.data })),
+      }),
+      signal,
+    },
+    auth,
+  );
 
   if (!res.ok) {
     throw new Error(`request failed: ${res.status} ${res.statusText}`);
@@ -234,8 +231,8 @@ export async function streamChat({
 }
 
 /** Lists conversations (most-recently-active first) for the sidebar. */
-export async function listConversations(): Promise<ConversationSummary[]> {
-  const res = await fetch(`${API_URL}/v1/sessions`);
+export async function listConversations(auth?: ChatAuth): Promise<ConversationSummary[]> {
+  const res = await authedFetch(`${API_URL}/v1/sessions`, {}, auth);
   if (!res.ok) {
     throw new Error(`request failed: ${res.status} ${res.statusText}`);
   }
@@ -243,8 +240,15 @@ export async function listConversations(): Promise<ConversationSummary[]> {
 }
 
 /** Fetches the full transcript of a conversation. */
-export async function fetchMessages(conversationId: string): Promise<Message[]> {
-  const res = await fetch(`${API_URL}/v1/sessions/${conversationId}/messages`);
+export async function fetchMessages(
+  conversationId: string,
+  auth?: ChatAuth,
+): Promise<Message[]> {
+  const res = await authedFetch(
+    `${API_URL}/v1/sessions/${conversationId}/messages`,
+    {},
+    auth,
+  );
   if (!res.ok) {
     throw new Error(`request failed: ${res.status} ${res.statusText}`);
   }
@@ -262,10 +266,15 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
 }
 
 /** Deletes a conversation and its messages. */
-export async function deleteConversation(conversationId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/v1/sessions/${conversationId}`, {
-    method: "DELETE",
-  });
+export async function deleteConversation(
+  conversationId: string,
+  auth?: ChatAuth,
+): Promise<void> {
+  const res = await authedFetch(
+    `${API_URL}/v1/sessions/${conversationId}`,
+    { method: "DELETE" },
+    auth,
+  );
   if (!res.ok) {
     throw new Error(`request failed: ${res.status} ${res.statusText}`);
   }

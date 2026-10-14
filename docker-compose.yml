@@ -115,6 +115,8 @@ services:
       # Hosts allowed to iframe the widget (/embed) — merchant-web's Vite dev
       # server locally. Read at server start by next.config.ts.
       EMBED_FRAME_ANCESTORS: http://localhost:5173
+      # Hosts the embed may take a sign-in token from (lib/host/) — same list.
+      NEXT_PUBLIC_EMBED_HOST_ORIGINS: http://localhost:5173
     depends_on:
       - agent-service
       - mock-server

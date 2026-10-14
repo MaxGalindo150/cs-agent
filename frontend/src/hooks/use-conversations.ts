@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { listConversations } from "@/lib/chat/api";
+import type { ChatAuth } from "@/lib/chat/auth";
 import type { ConversationSummary } from "@/lib/chat/types";
 
 export interface UseConversations {
@@ -11,17 +12,18 @@ export interface UseConversations {
   refresh: () => void;
 }
 
-/** Fetches the conversation list for the sidebar. */
-export function useConversations(): UseConversations {
+/** Fetches the caller's conversation list for the sidebar. Refetches when the
+ *  caller changes — agent-service only lists the caller's own sessions. */
+export function useConversations(auth?: ChatAuth): UseConversations {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
 
   const refresh = useCallback(() => {
-    listConversations()
+    listConversations(auth)
       .then(setConversations)
       .catch(() => {
         // Non-fatal: keep whatever we had if the list can't load.
       });
-  }, []);
+  }, [auth]);
 
   useEffect(() => {
     refresh();

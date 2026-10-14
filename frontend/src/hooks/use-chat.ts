@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchMessages, streamChat } from "@/lib/chat/api";
+import type { ChatAuth } from "@/lib/chat/auth";
 import type {
   ActivityStep,
   AttachedImage,
@@ -25,9 +26,9 @@ export interface UseChatOptions {
   /** Called after a send settles (reply persisted) so callers can refresh the
    *  conversation list. */
   onConversationUpdate?: () => void;
-  /** The simulated host-app identity to attach to every sent message (see
-   *  lib/identity/). Omit for an anonymous/guest visitor. */
-  principal?: { userId: string; email?: string };
+  /** Who is talking (see lib/chat/auth.ts). Omit for an anonymous visitor.
+   *  Must be stable across renders — a new object re-creates every callback. */
+  auth?: ChatAuth;
   /** localStorage key for the active conversation id. Distinct surfaces that
    *  share an origin (the demo page vs. the embedded widget) need distinct keys,
    *  or one reopens the other's conversation. */
@@ -64,7 +65,7 @@ export interface UseChat {
  * the same conversation. `reset` starts a new thread; `load` opens an existing.
  */
 export function useChat(options: UseChatOptions = {}): UseChat {
-  const { onConversationUpdate, principal, storageKey = DEFAULT_STORAGE_KEY } = options;
+  const { onConversationUpdate, auth, storageKey = DEFAULT_STORAGE_KEY } = options;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -239,7 +240,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
         message: trimmed,
         conversationId: conversationIdRef.current ?? undefined,
         images,
-        principal,
+        auth,
         signal: controller.signal,
         onConversationId: (id) => setConversation(id),
         onGate: (decision) => {
@@ -296,7 +297,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       appendDelta,
       setConversation,
       onConversationUpdate,
-      principal,
+      auth,
     ],
   );
 
@@ -324,7 +325,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       streamChat({
         choiceId: optionId,
         conversationId: conversationIdRef.current ?? undefined,
-        principal,
+        auth,
         signal: controller.signal,
         onConversationId: (id) => setConversation(id),
         onGate: (decision) => {
@@ -377,7 +378,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       appendDelta,
       setConversation,
       onConversationUpdate,
-      principal,
+      auth,
     ],
   );
 
@@ -399,7 +400,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       abortRef.current = null;
       setIsStreaming(false);
       setConversation(id);
-      fetchMessages(id)
+      fetchMessages(id, auth)
         .then((msgs) => setMessages(msgs))
         .catch(() => {
           // The conversation is gone (e.g. deleted) or unreachable: drop it so
@@ -408,7 +409,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
           setMessages([]);
         });
     },
-    [setConversation],
+    [setConversation, auth],
   );
 
   // Restore the last active conversation on mount (once). We fetch first and set
@@ -419,7 +420,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
     didRestore.current = true;
     const stored = window.localStorage.getItem(storageKey);
     if (!stored) return;
-    fetchMessages(stored)
+    fetchMessages(stored, auth)
       .then((msgs) => {
         setConversation(stored);
         setMessages(msgs);
@@ -428,7 +429,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
         // Stored conversation is gone (e.g. deleted) — forget it.
         window.localStorage.removeItem(storageKey);
       });
-  }, [setConversation, storageKey]);
+  }, [setConversation, storageKey, auth]);
 
   // Persist the active conversation. Skip the first run so mount doesn't wipe
   // the stored id before the restore effect reads it.

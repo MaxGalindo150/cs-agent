@@ -24,6 +24,9 @@ interface IdentityContextValue {
   users: DemoUser[];
   /** The currently logged-in demo user, or null for an anonymous visitor. */
   activeUser: DemoUser | null;
+  /** False until the stored login has been restored (or found absent) —
+   *  anything that acts as the user must wait for it. */
+  ready: boolean;
   login: (user: DemoUser) => void;
   logout: () => void;
 }
@@ -33,6 +36,7 @@ const IdentityContext = createContext<IdentityContextValue | null>(null);
 export function IdentityProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<DemoUser[]>([]);
   const [activeUser, setActiveUser] = useState<DemoUser | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     fetchDemoUsers()
@@ -44,7 +48,8 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         // Mock-server unreachable: stay anonymous rather than block the page.
-      });
+      })
+      .finally(() => setReady(true));
   }, []);
 
   const login = useCallback((user: DemoUser) => {
@@ -58,26 +63,10 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <IdentityContext.Provider value={{ users, activeUser, login, logout }}>
+    <IdentityContext.Provider value={{ users, activeUser, ready, login, logout }}>
       {children}
     </IdentityContext.Provider>
   );
-}
-
-const ANONYMOUS: IdentityContextValue = {
-  users: [],
-  activeUser: null,
-  login: () => {},
-  logout: () => {},
-};
-
-/** Pins everything below it to an anonymous visitor, shadowing the demo
- *  IdentityProvider from the root layout. Used by the embedded widget: it runs
- *  on the same origin as the demo page, so the demo user saved in
- *  localStorage would otherwise leak into a real host's chat. The host's own
- *  identity (casheaChat.init({ getToken })) replaces this once it is wired. */
-export function AnonymousIdentityProvider({ children }: { children: ReactNode }) {
-  return <IdentityContext.Provider value={ANONYMOUS}>{children}</IdentityContext.Provider>;
 }
 
 export function useIdentity(): IdentityContextValue {
