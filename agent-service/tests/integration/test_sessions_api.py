@@ -24,6 +24,11 @@ from agent.memory.repositories import SessionRepository
 from service.core.agent import get_database
 from service.main import create_app
 
+# Tests run with ENVIRONMENT=dev (tests/conftest.py), where the trusted
+# X-User-Id header stands in for a verified identity.
+_AS_A = {"X-User-Id": "usr_a"}
+_AS_B = {"X-User-Id": "usr_b"}
+
 
 @pytest.fixture
 async def api(database: Database) -> AsyncIterator[httpx.AsyncClient]:
@@ -40,14 +45,18 @@ async def test_lists_sessions_most_recently_active_first(
     # Separate transactions: now() is the transaction timestamp in Postgres, so
     # activity ordering is only meaningful across separate units of work.
     async with database.session() as s:
-        older_id = (await SessionRepository(s).create_session(title="viejo")).id
+        older_id = (
+            await SessionRepository(s).create_session(title="viejo", user_id="usr_a")
+        ).id
     async with database.session() as s:
-        newer_id = (await SessionRepository(s).create_session(title="nuevo")).id
+        newer_id = (
+            await SessionRepository(s).create_session(title="nuevo", user_id="usr_a")
+        ).id
     async with database.session() as s:
         # Touch the older one so it climbs back to the top.
         await SessionRepository(s).append_message(older_id, "user", "sigo aquí")
 
-    resp = await api.get("/v1/sessions")
+    resp = await api.get("/v1/sessions", headers=_AS_A)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -129,3 +138,66 @@ async def test_limit_is_bounded(api: httpx.AsyncClient) -> None:
     whole table."""
     assert (await api.get("/v1/sessions", params={"limit": 0})).status_code == 422
     assert (await api.get("/v1/sessions", params={"limit": 999})).status_code == 422
+
+
+# --- Scoped to the caller (docs/SECURITY.md §2) ------------------------------
+
+
+async def test_list_shows_only_the_callers_sessions(
+    api: httpx.AsyncClient, database: Database
+) -> None:
+    async with database.session() as s:
+        repo = SessionRepository(s)
+        mine = (await repo.create_session(title="mía", user_id="usr_a")).id
+        await repo.create_session(title="ajena", user_id="usr_b")
+        await repo.create_session(title="anónima")
+
+    body = (await api.get("/v1/sessions", headers=_AS_A)).json()
+
+    assert [row["id"] for row in body] == [str(mine)]
+
+
+async def test_anonymous_list_is_empty_even_with_anonymous_sessions(
+    api: httpx.AsyncClient, database: Database
+) -> None:
+    """Anonymous sessions have no owner to list by — listing them would show
+    every visitor everyone else's conversations."""
+    async with database.session() as s:
+        await SessionRepository(s).create_session(title="anónima")
+
+    resp = await api.get("/v1/sessions")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_messages_of_someone_elses_session_look_missing(
+    api: httpx.AsyncClient, database: Database
+) -> None:
+    async with database.session() as s:
+        repo = SessionRepository(s)
+        theirs = (await repo.create_session(title="ajena", user_id="usr_b")).id
+        await repo.append_message(theirs, "user", "privado")
+
+    assert (
+        await api.get(f"/v1/sessions/{theirs}/messages", headers=_AS_A)
+    ).status_code == 404
+    assert (await api.get(f"/v1/sessions/{theirs}/messages")).status_code == 404
+    assert (
+        await api.get(f"/v1/sessions/{theirs}/messages", headers=_AS_B)
+    ).status_code == 200
+
+
+async def test_cannot_delete_someone_elses_session(
+    api: httpx.AsyncClient, database: Database
+) -> None:
+    async with database.session() as s:
+        theirs = (
+            await SessionRepository(s).create_session(title="ajena", user_id="usr_b")
+        ).id
+
+    resp = await api.delete(f"/v1/sessions/{theirs}", headers=_AS_A)
+
+    assert resp.status_code == 404
+    async with database.session() as s:
+        assert await SessionRepository(s).get_session(theirs) is not None

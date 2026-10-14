@@ -19,9 +19,19 @@ from agent.loop.agent import LoopResult
 from agent.observability import Observer
 from agent.vision import Image
 from service.core.agent import get_agent
+from service.core.session_access import get_session_access
 from service.main import create_app
 
 _SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
+
+class _AllowAllSessions:
+    """Ownership is tested against a real database (integration/
+    test_session_access.py); these tests only need a resumed turn to proceed."""
+
+    async def require(self, session_id: uuid.UUID, principal: Principal | None) -> None:
+        return None
+
 
 # A real (tiny, 2x2 red) PNG — see tests/contract/test_chat.py for why a
 # "valid image" fixture needs real bytes, not an arbitrary base64 string.
@@ -206,6 +216,7 @@ async def test_chat_stream_forwards_choice_id_to_respond() -> None:
     app = create_app()
     agent = _StreamAgent()
     app.dependency_overrides[get_agent] = lambda: agent
+    app.dependency_overrides[get_session_access] = _AllowAllSessions
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         async with c.stream(

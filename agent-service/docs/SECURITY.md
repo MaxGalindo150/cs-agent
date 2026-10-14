@@ -6,55 +6,47 @@ list of security debt, kept next to the code it describes.
 
 ---
 
-## 1. Identity is self-asserted, not verified (dev-only)
+## 1. Identity: verified for the widget, self-asserted only in dev
 
-**What:** `service/core/identity.py::get_principal` trusts the `X-User-Id` /
-`X-User-Email` headers verbatim — no signature, no token, no verification.
-It only runs when `settings.is_development` is true; everywhere else it
-returns `None` (and `Settings.environment` defaults to `"prod"`, so a
-deployment that omits `ENVIRONMENT` fails closed, not open).
+**Resolved for the embedded widget.** `service/core/identity.py::get_principal`
+now verifies an `Authorization: Bearer` session token, issued by
+`POST /v1/auth/session` only after the host app's Firebase ID token checks out
+(`service/core/host_token.py`: Google signature, `aud`/`iss` = the configured
+project, expiry, `auth_time`). An invalid or expired bearer is a 401, never an
+anonymous fallback. Both `FIREBASE_PROJECT_ID` and `SESSION_SIGNING_KEY`
+default to empty, which issues and accepts nothing (fail closed).
 
-**Risk:** inside a `dev` environment, any caller can attribute a request —
-and now a persisted `chat_sessions.user_id` row (ADR-0002) — to *any* user id
-just by setting the header. Impersonation is trivial in dev.
+**Still accepted (dev-only):** with no bearer, `X-User-Id` / `X-User-Email` are
+trusted verbatim when `settings.is_development` — the demo page's simulated
+login. Anyone can impersonate anyone there; outside dev these headers are
+ignored.
 
-**Blast radius today:** bounded. Nothing currently *reads* `user_id` to
-authorize access — it is write-only attribution data (which conversation
-"belongs" to whom, or which fact/episode is about whom — `facts.user_id` /
-`episodes.user_id`), not yet an access-control gate. It graduates from
-"corrupted ownership data" to "real access-control bypass" the moment
-something scopes a *read* by trusting this value — e.g. a "list my
-sessions" endpoint, or semantic-memory retrieval filtered by `user_id`.
+**Residual risks:**
 
-**Accepted because:** this is an explicit, temporary stub (see the
-docstring in `service/core/identity.py`), built to simulate per-user
-identity end-to-end (the demo login selector in the frontend) before real
-auth exists anywhere in the stack.
-
-**Fix:** replace `get_principal`'s body with real verification (extract the
-subject claim from a verified bearer token instead of trusting a header).
-Its shape (`-> Principal | None`) does not change, so no caller — `agent/`,
-`chat.py`, `chat_stream.py` — needs to change when this happens.
-
-**Until then:** do not build authorization (session-ownership checks,
-per-user data filtering) on the assumption that `Principal`/`user_id` is a
-verified identity. See item 2.
+- A session token is a bearer credential for its TTL (`SESSION_TTL_SECONDS`,
+  15 min by default): leaked, it can be replayed until it expires. Not
+  revocable — keep the TTL short rather than adding a denylist.
+- `SESSION_SIGNING_KEY` signs every session; rotating it logs every widget
+  out (they renew transparently through the host's `getToken`).
+- Firebase revocation (`revoked` users, disabled accounts) is not checked —
+  only signature and expiry, so a revoked host token stays usable for the rest
+  of its hour. Acceptable while the session TTL is short; revisit if
+  revocation must take effect immediately.
 
 ---
 
-## 2. Session-ownership is not verified on resume
+## 2. Session ownership — resolved
 
-**What:** resuming a conversation by `session_id` (`POST /v1/chat` /
-`/v1/chat/stream` with an existing `session_id`) does not check that the
-caller's resolved `Principal` matches the session's stored `user_id`.
+Resuming a conversation (`/v1/chat`, `/v1/chat/stream` with a `session_id`),
+reading its messages and deleting it all go through
+`service/core/session_access.py`: the caller's `user_id` must equal the one
+stamped on the session at creation (`NULL` for anonymous). A mismatch is a 404,
+indistinguishable from a missing session. `GET /v1/sessions` lists only the
+caller's own sessions, and nothing for an anonymous caller.
 
-**Risk:** low today — `session_id` is an unguessable UUID, and nothing
-scoped to a specific user is exposed through a resumed session beyond its
-own messages.
-
-**Fix:** once item 1 lands (real auth), add an ownership check in the chat
-endpoints: reject (or silently start a fresh session) when
-`principal.user_id != session.user_id`.
+**Remaining:** anonymous sessions are reachable by anyone holding their
+(unguessable, UUIDv4) id — that id is the only credential an anonymous visitor
+has.
 
 ---
 
@@ -84,7 +76,10 @@ search across, another user's facts/episodes.
 
 ## Referenced from
 
-- `src/service/core/identity.py` — the stub itself.
+- `src/service/core/identity.py` — identity resolution (bearer, then dev headers).
+- `src/service/core/host_token.py` / `session_token.py` — Firebase verification and
+  the widget session token.
+- `src/service/core/session_access.py` — session ownership.
 - `src/agent/memory/models.py` — `ChatSession.user_id`, `Fact.user_id`,
   `Episode.user_id`.
 - `src/agent/tools/registry.py` — `Tool.requires_identity` gate (the pattern

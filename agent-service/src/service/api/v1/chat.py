@@ -22,6 +22,7 @@ from agent.identity import Principal
 from agent.vision import Image
 from service.core.agent import get_agent
 from service.core.identity import get_principal
+from service.core.session_access import SessionAccess, get_session_access
 
 log = structlog.get_logger()
 
@@ -174,6 +175,7 @@ async def chat(
     req: ChatRequest,
     agent: Agent = Depends(get_agent),
     principal: Principal | None = Depends(get_principal),
+    access: SessionAccess = Depends(get_session_access),
 ) -> ChatResponse:
     log.info(
         "chat.principal_resolved",
@@ -190,6 +192,8 @@ async def chat(
             session_title(req.message), principal=principal
         )
     else:
+        # Continuing a thread: only the identity that started it may.
+        await access.require(req.session_id, principal)
         session_id = req.session_id
     images = [img.to_agent_image() for img in req.images] or None
     result = await agent.respond(

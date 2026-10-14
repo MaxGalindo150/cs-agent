@@ -156,12 +156,18 @@ class SessionRepository:
         await self._db.flush()
         return True
 
-    async def list_sessions(self, limit: int = 50) -> list[ChatSession]:
-        """Most recently active first — the order a chat sidebar wants."""
+    async def list_sessions(
+        self, limit: int = 50, *, user_id: str | None = None
+    ) -> list[ChatSession]:
+        """Most recently active first — the order a chat sidebar wants.
+
+        ``user_id`` narrows to one user's sessions; ``None`` means no filter
+        (internal callers), not "anonymous sessions"."""
+        query = select(ChatSession)
+        if user_id is not None:
+            query = query.where(ChatSession.user_id == user_id)
         result = await self._db.execute(
-            select(ChatSession)
-            .order_by(ChatSession.last_activity_at.desc())
-            .limit(limit)
+            query.order_by(ChatSession.last_activity_at.desc()).limit(limit)
         )
         return list(result.scalars().all())
 

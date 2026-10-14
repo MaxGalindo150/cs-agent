@@ -49,6 +49,21 @@ class Settings(BaseSettings):
         alias="ALLOWED_ORIGINS",
     )
 
+    # --- Host identity (embedded widget, service/core/host_token.py) ---
+    # The Firebase project whose ID tokens the host app (merchant-web) hands
+    # the widget. Fail-closed default: empty means no host token verifies, so
+    # nobody can exchange one for a session.
+    firebase_project_id: str = Field(default="", alias="FIREBASE_PROJECT_ID")
+
+    # HMAC key for the session tokens this service issues after verifying a
+    # host token (service/core/session_token.py). Secret. Same fail-closed
+    # default: empty means no session token is issued or accepted.
+    session_signing_key: str = Field(default="", alias="SESSION_SIGNING_KEY")
+
+    # Kept short: the widget renews through the host's getToken() on expiry,
+    # so a leaked token is only good for minutes.
+    session_ttl_seconds: int = Field(default=900, gt=0, alias="SESSION_TTL_SECONDS")
+
     # --- Anthropic ---
     anthropic_api_key: str = Field(alias="ANTHROPIC_API_KEY")
 

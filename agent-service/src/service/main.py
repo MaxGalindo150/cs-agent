@@ -35,6 +35,7 @@ from service.core.agent import (
     build_service_agent,
 )
 from service.core.config import Settings, get_settings
+from service.core.host_token import FirebaseTokenVerifier
 from service.core.limits import MaxBodySizeMiddleware
 from service.core.llm import build_anthropic_client
 from service.core.migrations import upgrade_to_head
@@ -92,6 +93,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # connections. Routes reach it via the get_llm_client dependency.
     app.state.llm = build_anthropic_client(settings)
     app.state.bnpl = build_bnpl_client(settings)
+    # Verifies the embedded widget host's Firebase tokens; built once so its
+    # cache of Google's signing keys is shared (service/core/host_token.py).
+    app.state.host_verifier = FirebaseTokenVerifier(settings.firebase_project_id)
     # Durable stores for memory & sessions (pooled) — built before the registry
     # since manage_memory (agent/tools/implementations/memory.py) needs it.
     app.state.db = build_database(settings)
