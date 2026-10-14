@@ -37,15 +37,12 @@ class InvalidHostToken(Exception):
 
 @dataclass(frozen=True, slots=True)
 class HostIdentity:
-    """What a verified Firebase token says about the caller. The merchant
-    fields come from merchant-web's custom claims and are absent for users of
-    any other Firebase app."""
+    """What a verified Firebase token says about the caller. Who they are at
+    Cashea (merchant, store, role) is not in the token — merchant-web sets no
+    such claims; see service/core/merchant_directory.py."""
 
     uid: str
     email: str | None
-    merchant_id: str | None
-    store_id: str | None
-    role: str | None
 
 
 class FirebaseTokenVerifier:
@@ -81,15 +78,4 @@ class FirebaseTokenVerifier:
         if claims["auth_time"] > time.time() + _LEEWAY_SECONDS:
             raise InvalidHostToken("auth_time is in the future")
 
-        return HostIdentity(
-            uid=claims["sub"],
-            email=claims.get("email"),
-            merchant_id=_optional_str(claims.get("merchantId")),
-            store_id=_optional_str(claims.get("storeId")),
-            role=_optional_str(claims.get("role")),
-        )
-
-
-def _optional_str(value: object) -> str | None:
-    # Custom claims may arrive as numbers; Principal carries strings.
-    return None if value is None else str(value)
+        return HostIdentity(uid=claims["sub"], email=claims.get("email"))

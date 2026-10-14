@@ -19,6 +19,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 import structlog
 from anthropic import APIError
 from fastapi import FastAPI
@@ -96,6 +97,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Verifies the embedded widget host's Firebase tokens; built once so its
     # cache of Google's signing keys is shared (service/core/host_token.py).
     app.state.host_verifier = FirebaseTokenVerifier(settings.firebase_project_id)
+    # Cashea's merchant API, called with an aliado's own token (identity
+    # lookup at sign-in; the merchant tools later). None when unconfigured.
+    app.state.merchant_api = (
+        httpx.AsyncClient(base_url=settings.merchant_api_url, timeout=5.0)
+        if settings.merchant_api_url
+        else None
+    )
     # Durable stores for memory & sessions (pooled) — built before the registry
     # since manage_memory (agent/tools/implementations/memory.py) needs it.
     app.state.db = build_database(settings)
@@ -117,6 +125,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         await app.state.llm.close()
         await app.state.bnpl.aclose()
+        if app.state.merchant_api is not None:
+            await app.state.merchant_api.aclose()
         await app.state.embedder.aclose()
         await app.state.db.dispose()
         log.info("service.stop", service=SERVICE_NAME)

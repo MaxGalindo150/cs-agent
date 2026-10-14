@@ -72,10 +72,14 @@ class Memory:
         # service still runs, just without paraphrase matching (ADR-0003 §7).
         self.facts = PostgresFactStore(db, embedder)
         self.episodes = PostgresEpisodeStore(db)
-        # Repo skills only for now. Waku also scans a user-home dir
-        # (WAKU_HOME/skills) for installed/agent-authored skills; on serverless
-        # there is no such home, so that path lands with its own decision later.
-        self.skills = SkillLoader([REPO_SKILLS])
+        # Repo skills only for now, one directory per audience
+        # (skills/consumer, skills/merchant) so a consumer policy can never
+        # load into an aliado's turn or the reverse. Waku also scans a
+        # user-home dir for agent-authored skills; on serverless there is no
+        # such home, so that path lands with its own decision later.
+        # Keyed by plain audience string, built on first use — the facade
+        # never imports agent.identity (see the module docstring).
+        self.skills: dict[str, SkillLoader] = {}
 
     # ---- retrieval (gated — see retrieval_gate.py for why) -----------------
     async def gated_retrieve(
@@ -106,11 +110,14 @@ class Memory:
         return "\n".join(found)
 
     # ---- procedural --------------------------------------------------------
-    def matching_skills(self, message: str) -> str:
-        """Procedural memory: the bodies of any SKILL.md policies whose
-        name+description overlaps this message (progressive disclosure). Empty
-        when nothing matches — or when the skills/ dir has no skills yet."""
-        matched = self.skills.match(message)
+    def matching_skills(self, message: str, audience: str = "consumer") -> str:
+        """Procedural memory: the bodies of this audience's SKILL.md policies
+        whose name+description overlaps this message (progressive disclosure).
+        Empty when nothing matches — or when there are no skills yet."""
+        loader = self.skills.get(audience)
+        if loader is None:
+            loader = self.skills[audience] = SkillLoader([REPO_SKILLS / audience])
+        matched = loader.match(message)
         return "\n\n".join(f"### {s.name}\n{s.body}" for s in matched)
 
     # ---- sessions & chat log ----------------------------------------------

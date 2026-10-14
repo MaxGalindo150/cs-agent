@@ -93,4 +93,5 @@ def make_get_transactions_tool(client: httpx.AsyncClient) -> Tool:
         },
         fn=get_transactions,
         requires_identity=True,
+        audiences=frozenset({"consumer"}),
     )

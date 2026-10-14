@@ -76,6 +76,9 @@ services:
       # peers by compose service name. Browser-facing URLs (the frontend's
       # NEXT_PUBLIC_API_URL) stay on localhost — the browser is on the host.
       BNPL_API_URL: http://mock-server:3001
+      # Cashea's merchant API (staging) — aliado identity at sign-in and the
+      # merchant tools, called with the aliado's own Firebase token.
+      MERCHANT_API_URL: ${MERCHANT_API_URL:-https://staging.core.api.cashea.app/merchant-web}
       AGENT_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-csa}:${POSTGRES_PASSWORD:-csa}@postgres:5432/${POSTGRES_DB:-customer_support}
       # Integration tests create and migrate their own database, never touching
       # the dev one. Set here so `docker compose exec agent-service uv run

@@ -48,9 +48,6 @@ def _claims(**overrides: Any) -> dict[str, Any]:
         "exp": now + 3600,
         "auth_time": now - 60,
         "email": "aliado@example.com",
-        "merchantId": 42,
-        "storeId": "7",
-        "role": "admin",
     }
     claims.update(overrides)
     return {k: v for k, v in claims.items() if v is not None}
@@ -60,23 +57,11 @@ def _sign(claims: dict[str, Any], key: Any = _GOOGLE_KEY, alg: str = "RS256") ->
     return jwt.encode(claims, key, algorithm=alg)
 
 
-def test_valid_token_yields_the_merchant_identity() -> None:
+def test_valid_token_yields_the_firebase_identity() -> None:
     host = _verifier().verify(_sign(_claims()))
 
     assert host.uid == "firebase-uid-1"
     assert host.email == "aliado@example.com"
-    # Numeric custom claims come back as strings (Principal carries strings).
-    assert host.merchant_id == "42"
-    assert host.store_id == "7"
-    assert host.role == "admin"
-
-
-def test_token_without_merchant_claims_still_verifies() -> None:
-    host = _verifier().verify(_sign(_claims(merchantId=None, storeId=None, role=None)))
-
-    assert host.merchant_id is None
-    assert host.store_id is None
-    assert host.role is None
 
 
 @pytest.mark.parametrize(

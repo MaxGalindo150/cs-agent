@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from agent.identity import AUDIENCES, Audience, audience_of
 from agent.tools.context import ToolContext
 
 # `{arg}` placeholders in a progress_label. Deliberately not str.format: that
@@ -68,6 +69,13 @@ class Tool:
     ``ToolContext`` (e.g. ``session_id``) that an anonymous caller can also
     have. Set this instead of ``requires_identity`` when a tool needs context
     but must keep working for a caller with no resolved ``Principal``."""
+
+    audiences: frozenset[Audience] = frozenset(AUDIENCES)
+    """Who this tool exists for (``agent.identity.audience_of``). A consumer
+    tool (their own orders) is meaningless — or misleading — for an aliado,
+    and the reverse; ``schemas`` hides a tool outside the turn's audience and
+    ``execute`` refuses it, the same way as ``requires_identity``. Defaults
+    to every audience: general tools (escalation, choices) serve both."""
 
     suspends: bool = False
     """If true, calling this tool stops ``run_loop`` immediately after it
@@ -128,14 +136,9 @@ class ToolRegistry:
         anonymous turn wastes no context on a tool it can never use, and the
         model never gets a round trip to discover that the hard way. Same
         ``ctx``/``requires_identity`` this registry already gates ``execute``
-        on — no new concept.
+        on — no new concept. Likewise a tool outside the turn's audience.
         """
-        identified = ctx is not None and ctx.principal is not None
-        return [
-            t.to_api()
-            for t in self._tools.values()
-            if identified or not t.requires_identity
-        ]
+        return [t.to_api() for t in self._tools.values() if _available(t, ctx)]
 
     def label(self, name: str, args: dict[str, Any]) -> str:
         """What a UI should show while this call runs. An unknown tool still
@@ -170,9 +173,20 @@ class ToolRegistry:
                 f"Error: {name} requires an identified user, but none is "
                 "available for this conversation."
             )
+        if not _available(tool, ctx):
+            return f"Error: {name} is not available in this conversation."
         try:
             if tool.requires_identity or tool.needs_context:
                 return await tool.fn(ctx=ctx, **args)
             return await tool.fn(**args)
         except Exception as exc:  # surface, don't crash — the model can retry
             return f"Error running {name}: {exc}"
+
+
+def _available(tool: Tool, ctx: ToolContext | None) -> bool:
+    """Whether this turn may use ``tool``: identity (if it needs one) and
+    audience both fit."""
+    principal = ctx.principal if ctx is not None else None
+    if tool.requires_identity and principal is None:
+        return False
+    return audience_of(principal) in tool.audiences

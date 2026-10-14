@@ -78,6 +78,7 @@ def make_get_order_tool(client: httpx.AsyncClient) -> Tool:
         },
         fn=get_order,
         requires_identity=True,
+        audiences=frozenset({"consumer"}),
     )
 
 
@@ -136,6 +137,7 @@ def make_get_order_shipment_tool(client: httpx.AsyncClient) -> Tool:
         },
         fn=get_order_shipment,
         requires_identity=True,
+        audiences=frozenset({"consumer"}),
     )
 
 
@@ -207,6 +209,7 @@ def make_get_order_installments_tool(client: httpx.AsyncClient) -> Tool:
         },
         fn=get_order_installments,
         requires_identity=True,
+        audiences=frozenset({"consumer"}),
     )
 
 
@@ -312,4 +315,5 @@ def make_get_my_orders_tool(client: httpx.AsyncClient) -> Tool:
         input_schema={"type": "object", "properties": {}},
         fn=get_my_orders,
         requires_identity=True,
+        audiences=frozenset({"consumer"}),
     )

@@ -3,7 +3,8 @@
 The "inner box": rebuilt each turn, thrown away. What persists lives in
 agent/memory. Working memory =
 
-    SOUL (identity + how it works)     ← who Cheo is
+    SOUL (identity + how it works)     ← who Cheo is, per audience
+  + who the caller is                  ← an aliado's store and role
   + current time                       ← resolve relative dates
   + durable facts & episodes           ← what Cheo remembers (gated!)
   + matched skill instructions         ← domain policy, only when it applies
@@ -20,18 +21,34 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from agent.identity import AUDIENCES, Audience, Principal, audience_of
 from agent.observability import LoopEvent, Observer
 from agent.prompts import load_prompt
 
-DEFAULT_SOUL = load_prompt("souls/consumer")
+# One soul per audience (agent.identity.audience_of): end customers and
+# aliados get different personas, scope and rules. Edited in prompts/souls/.
+SOULS: dict[Audience, str] = {
+    audience: load_prompt(f"souls/{audience}") for audience in AUDIENCES
+}
+DEFAULT_SOUL = SOULS["consumer"]
 
 
-def load_soul() -> str:
-    """The persona. Waku reads an editable SOUL.md from the user's home dir
-    (procedural memory you can hand-edit); serverless has no durable local disk,
-    so for now the soul is this constant. A config- or DB-backed editable soul
-    is a later decision."""
-    return DEFAULT_SOUL
+def load_soul(audience: Audience = "consumer") -> str:
+    """The persona for this audience. Waku reads an editable SOUL.md from the
+    user's home dir; serverless has no durable local disk, so souls ship with
+    the code (prompts/souls/)."""
+    return SOULS[audience]
+
+
+def caller_context(principal: Principal | None) -> str | None:
+    """Who an aliado is, from their verified merchant record — appended by
+    code so the soul stays static text. None for anyone else."""
+    if principal is None or audience_of(principal) != "merchant":
+        return None
+    store = principal.store_name or "their store"
+    merchant = f" ({principal.merchant_name})" if principal.merchant_name else ""
+    role = principal.role or "employee"
+    return f'\nYou are talking to the {role} of the store "{store}"{merchant}.'
 
 
 class Session:
@@ -69,16 +86,21 @@ class Session:
     async def build_system(
         self,
         user_message: str,
-        user_id: str | None = None,
+        principal: Principal | None = None,
         notify: Observer | None = None,
     ) -> str:
+        audience = audience_of(principal)
+        user_id = principal.user_id if principal else None
         # The service should know the request-handling clock so the model can
         # resolve relative dates ("ayer", "en 30 minutos"). TODO: timezone via env.
         now = datetime.now().astimezone()
-        parts = [
-            load_soul(),
-            f"\nRight now it is {now:%A, %Y-%m-%d %H:%M} ({now:%Z}, UTC{now:%z}).",
-        ]
+        parts = [load_soul(audience)]
+        context = caller_context(principal)
+        if context:
+            parts.append(context)
+        parts.append(
+            f"\nRight now it is {now:%A, %Y-%m-%d %H:%M} ({now:%Z}, UTC{now:%z})."
+        )
 
         if self.memory is not None:
             # Hero moment #1: a cheap judge decides IF we retrieve at all —
@@ -89,7 +111,7 @@ class Session:
             )
             if retrieved:
                 parts.append("\nRelevant memory:\n" + retrieved)
-            skills = self.memory.matching_skills(user_message)
+            skills = self.memory.matching_skills(user_message, audience)
             if skills:
                 parts.append("\nRelevant skill instructions:\n" + skills)
 

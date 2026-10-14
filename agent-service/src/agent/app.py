@@ -396,8 +396,7 @@ class Agent:
                 self._tracer.end_turn(reply, 0)
                 return LoopResult(reply=reply)
 
-            user_id = principal.user_id if principal else None
-            system = await session.build_system(user_message, user_id, notify=notify)
+            system = await session.build_system(user_message, principal, notify=notify)
 
             # session.history is list[dict]; the loop wants the SDK's MessageParam.
             # Cast at this boundary (as the loop casts its tool schemas) — the
@@ -604,8 +603,9 @@ class Agent:
             resolution_text = f"The customer selected: {matched['label']}"
         else:
             assert user_message is not None  # guaranteed by the guard above
-            user_id = ctx.principal.user_id if ctx.principal else None
-            system = await session.build_system(user_message, user_id, notify=notify)
+            system = await session.build_system(
+                user_message, ctx.principal, notify=notify
+            )
             resolution_text = user_message
 
         baseline = cast("list[MessageParam]", session.history[:-2] + state.turn_tail)

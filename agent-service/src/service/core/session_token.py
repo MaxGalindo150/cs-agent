@@ -39,7 +39,10 @@ def issue(principal: Principal, signing_key: str, ttl_seconds: int) -> str:
         "sub": principal.user_id,
         "email": principal.email,
         "merchant_id": principal.merchant_id,
+        "merchant_name": principal.merchant_name,
         "store_id": principal.store_id,
+        "store_uuid": principal.store_uuid,
+        "store_name": principal.store_name,
         "role": principal.role,
     }
     return jwt.encode(claims, signing_key, algorithm="HS256")
@@ -63,6 +66,9 @@ def verify(token: str, signing_key: str) -> Principal:
         user_id=claims["sub"],
         email=claims.get("email"),
         merchant_id=claims.get("merchant_id"),
+        merchant_name=claims.get("merchant_name"),
         store_id=claims.get("store_id"),
+        store_uuid=claims.get("store_uuid"),
+        store_name=claims.get("store_name"),
         role=claims.get("role"),
     )

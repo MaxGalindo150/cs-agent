@@ -91,3 +91,37 @@ async def test_fixed_response_short_circuits_an_escalated_session() -> None:
 
     assert fixed is not None
     assert "human agent" in fixed.lower()
+
+
+# --- Audience: soul and caller context ---------------------------------------
+
+
+async def test_an_aliado_gets_the_merchant_soul_and_their_store() -> None:
+    from agent.identity import Principal
+    from agent.runtime.session import SOULS
+
+    aliado = Principal(
+        user_id="uid_1",
+        merchant_id="42",
+        merchant_name="Tienda Bella",
+        store_name="Sucursal Centro",
+        role="ADMIN",
+    )
+
+    system = await Session(uuid.uuid4(), memory=None).build_system("hola", aliado)
+
+    assert system.startswith(SOULS["merchant"])
+    assert SOULS["consumer"] not in system
+    assert 'the ADMIN of the store "Sucursal Centro" (Tienda Bella)' in system
+
+
+async def test_a_customer_gets_the_consumer_soul_and_no_store_context() -> None:
+    from agent.identity import Principal
+    from agent.runtime.session import SOULS
+
+    system = await Session(uuid.uuid4(), memory=None).build_system(
+        "hola", Principal(user_id="usr_1")
+    )
+
+    assert system.startswith(SOULS["consumer"])
+    assert "of the store" not in system

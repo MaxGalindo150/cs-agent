@@ -7,7 +7,8 @@ reloads the service (`--reload-include *.md`).
 
 | Path | Used by |
 |---|---|
-| `souls/consumer.md` | The agent's persona and rules for end customers (`agent/runtime/session.py`) |
+| `souls/consumer.md` | Persona and rules for end customers (`agent/runtime/session.py`) |
+| `souls/merchant.md` | Persona and rules for aliados — merchant employees. The store, merchant and role are appended by code |
 | `internal/retrieval_gate.md` | Fast-model gate: should this turn search memory? (`agent/memory/retrieval_gate.py`) |
 | `internal/memory_summarizer.md` | Distils conversations into facts/episodes (`agent/memory/consolidation.py`) |
 

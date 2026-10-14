@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     # so a leaked token is only good for minutes.
     session_ttl_seconds: int = Field(default=900, gt=0, alias="SESSION_TTL_SECONDS")
 
+    # Cashea's merchant API (the gateway merchant-web calls, e.g.
+    # https://staging.core.api.cashea.app/merchant-web). Used with the aliado's
+    # own Firebase token to look up who they are (service/core/merchant_directory.py)
+    # and, later, by the merchant tools. Empty: no merchant lookups — every
+    # verified host user is treated as a consumer.
+    merchant_api_url: str = Field(default="", alias="MERCHANT_API_URL")
+
     # --- Anthropic ---
     anthropic_api_key: str = Field(alias="ANTHROPIC_API_KEY")
 

@@ -306,3 +306,54 @@ def test_schemas_includes_identity_gated_tools_once_identified() -> None:
     names = {s["name"] for s in reg.schemas(ctx)}
 
     assert names == {"echo", "whoami"}
+
+
+# --- Audience (agent.identity.audience_of) ----------------------------------
+
+_ALIADO = ToolContext(principal=Principal(user_id="uid_1", merchant_id="42"))
+_CUSTOMER = ToolContext(principal=Principal(user_id="usr_1"))
+
+
+def _audience_registry() -> ToolRegistry:
+    async def ok(**_: Any) -> str:
+        return "ok"
+
+    reg = ToolRegistry()
+    for name, audiences in [
+        ("customer_only", frozenset({"consumer"})),
+        ("aliado_only", frozenset({"merchant"})),
+        ("everyone", frozenset({"consumer", "merchant"})),
+    ]:
+        reg.register(
+            Tool(
+                name=name,
+                description="test tool",
+                input_schema=_SCHEMA,
+                fn=ok,
+                needs_context=True,
+                audiences=audiences,  # type: ignore[arg-type]
+            )
+        )
+    return reg
+
+
+def _names(reg: ToolRegistry, ctx: ToolContext | None) -> set[str]:
+    return {schema["name"] for schema in reg.schemas(ctx)}
+
+
+def test_an_aliado_sees_only_merchant_and_shared_tools() -> None:
+    assert _names(_audience_registry(), _ALIADO) == {"aliado_only", "everyone"}
+
+
+def test_a_customer_and_an_anonymous_visitor_see_only_consumer_tools() -> None:
+    reg = _audience_registry()
+    assert _names(reg, _CUSTOMER) == {"customer_only", "everyone"}
+    assert _names(reg, None) == {"customer_only", "everyone"}
+
+
+async def test_a_tool_outside_the_audience_is_refused_even_if_called() -> None:
+    reg = _audience_registry()
+
+    assert "not available" in await reg.execute("customer_only", {}, _ALIADO)
+    assert "not available" in await reg.execute("aliado_only", {}, _CUSTOMER)
+    assert await reg.execute("everyone", {}, _ALIADO) == "ok"
