@@ -4,9 +4,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface ChatHeaderProps {
+  title: string;
   /** Start a new conversation. When omitted, the button is hidden. */
   onNewChat?: () => void;
-  /** Who the widget thinks it's talking to, e.g. "Alice Johnson" or "Guest"
+  /** Who the widget thinks it's talking to, e.g. "Alice Johnson" or "Invitado"
    *  (see lib/identity/). Shown as a small subtitle for verifying the
    *  identity harness without opening devtools. */
   identityLabel?: string;
@@ -23,23 +24,24 @@ interface ChatHeaderProps {
 
 /** Slim top bar: title with a live status dot, and a new-chat button. */
 export function ChatHeader({
+  title,
   onNewChat,
   identityLabel,
   alwaysShowNewChat,
 }: ChatHeaderProps) {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
       <div className="flex items-center gap-2.5">
         <span className="relative flex size-2" aria-hidden>
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-60" />
           <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
         </span>
-        <span className="text-sm font-medium tracking-tight text-zinc-100">
-          Customer Support
+        <span className="text-sm font-medium tracking-tight text-foreground">
+          {title}
         </span>
         {identityLabel && (
-          <span className="rounded-full bg-zinc-900 px-2 py-0.5 text-xs text-zinc-400">
-            as {identityLabel}
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+            como {identityLabel}
           </span>
         )}
       </div>
@@ -49,12 +51,12 @@ export function ChatHeader({
           variant="ghost"
           size="icon-sm"
           className={cn(
-            "text-zinc-400 transition-colors duration-150 hover:text-zinc-100",
+            "text-muted-foreground transition-colors duration-150 hover:text-foreground",
             !alwaysShowNewChat && "sm:hidden",
           )}
           onClick={onNewChat}
-          aria-label="New conversation"
-          title="New conversation"
+          aria-label="Nueva conversación"
+          title="Nueva conversación"
         >
           <SquarePen />
         </Button>

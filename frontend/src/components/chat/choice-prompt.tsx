@@ -50,10 +50,10 @@ export function ChoicePrompt({
 
   return (
     <div className="mb-3 max-w-sm">
-      <p className="mb-2 text-[15px] leading-7 text-zinc-200">{prompt}</p>
+      <p className="mb-2 text-[15px] leading-7 text-foreground">{prompt}</p>
       {settled ? (
-        <div className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 px-3.5 py-2 text-sm text-zinc-300">
-          <Check className="size-3.5 shrink-0 text-zinc-500" />
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/40 px-3.5 py-2 text-sm text-foreground/80">
+          <Check className="size-3.5 shrink-0 text-muted-foreground" />
           {picked ? picked.label : "Respondido"}
         </div>
       ) : (
@@ -65,8 +65,8 @@ export function ChoicePrompt({
               disabled={disabled}
               onClick={() => onSelect?.(option.id)}
               className={cn(
-                "rounded-xl border border-zinc-700 px-3.5 py-2 text-sm text-zinc-200 transition-colors duration-150",
-                "hover:bg-zinc-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600",
+                "rounded-xl border border-ring px-3.5 py-2 text-sm text-foreground transition-colors duration-150",
+                "hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 "disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >

@@ -4,11 +4,16 @@
 
 @plugin "@tailwindcss/typography";
 
-@custom-variant dark (&:is(.dark *));
+/* <html> is always .dark (see layout), so a light theme nested inside it
+   must opt out of `dark:` utilities — otherwise shadcn's dark-only overrides
+   leak into the embedded widget. */
+@custom-variant dark (&:is(.dark *):not(.theme-cashea, .theme-cashea *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-user-bubble: var(--user-bubble);
+  --color-user-bubble-foreground: var(--user-bubble-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-geist-sans);
@@ -116,6 +121,43 @@
   --sidebar-accent-foreground: #f4f4f5;
   --sidebar-border: #27272a;
   --sidebar-ring: #3f3f46;
+  --user-bubble: rgb(39 39 42 / 0.6); /* zinc-800/60 */
+  --user-bubble-foreground: #f4f4f5;
+  --shimmer-base: #71717a; /* zinc-500 */
+  --shimmer-highlight: #e4e4e7; /* zinc-200 */
+}
+
+/* Cashea theme — the embedded widget (/embed), matched to merchant-web's Luz
+   design system (@cashea-bnpl/ds-luz-tokens). Values are copied rather than
+   imported: Luz is a private package and the widget needs only these few.
+   Source token named in each comment. */
+.theme-cashea {
+  color-scheme: light;
+  font-family: var(--font-open-sans), system-ui, sans-serif;
+
+  --background: #fefefe; /* bg-screen (gray-000) */
+  --foreground: #181919; /* text-primary (gray-1000) */
+  --card: #ffffff; /* bg-elevated */
+  --card-foreground: #181919;
+  --popover: #ffffff;
+  --popover-foreground: #181919;
+  --primary: #303134; /* bg-inverse (gray-900) — Luz primary button */
+  --primary-foreground: #fefefe; /* text-inverse */
+  --secondary: #f5f5f5; /* bg-neutral (gray-100) */
+  --secondary-foreground: #181919;
+  --muted: #fafafa; /* bg-screen-cards (gray-50) */
+  --muted-foreground: #61646b; /* text-secondary (gray-700) */
+  --accent: #f5f5f5;
+  --accent-foreground: #181919;
+  --destructive: #e0291f; /* red-700 */
+  --border: #e6e7e8; /* border-default (gray-200) */
+  --input: #e6e7e8;
+  --ring: #afb1b6; /* border-strong (gray-400) */
+  --radius: 0.75rem; /* radius-m */
+  --user-bubble: #fff799; /* yellow-cashea-300 */
+  --user-bubble-foreground: #181919;
+  --shimmer-base: #94979e; /* gray-500 */
+  --shimmer-highlight: #d6d7d9; /* gray-300 */
 }
 
 /* A highlight that sweeps across text while something is in progress — the
@@ -137,9 +179,9 @@
 @utility text-shimmer {
   background-image: linear-gradient(
     100deg,
-    var(--color-zinc-500) 40%,
-    var(--color-zinc-200) 50%,
-    var(--color-zinc-500) 60%
+    var(--shimmer-base) 40%,
+    var(--shimmer-highlight) 50%,
+    var(--shimmer-base) 60%
   );
   background-size: 200% auto;
   background-clip: text;
@@ -152,7 +194,7 @@
   @media (prefers-reduced-motion: reduce) {
     animation: none;
     background-image: none;
-    color: var(--color-zinc-400);
+    color: var(--muted-foreground);
   }
 }
 

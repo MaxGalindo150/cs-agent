@@ -85,49 +85,49 @@ function CodeBlock({
 const components: Components = {
   p({ children }) {
     return (
-      <p className="my-4 text-[15px] leading-7 text-zinc-200 first:mt-0 last:mb-0">
+      <p className="my-4 text-[15px] leading-7 text-foreground first:mt-0 last:mb-0">
         {children}
       </p>
     );
   },
   h1({ children }) {
     return (
-      <h1 className="mt-8 mb-3 text-2xl font-semibold tracking-tight text-zinc-100 first:mt-0">
+      <h1 className="mt-8 mb-3 text-2xl font-semibold tracking-tight text-foreground first:mt-0">
         {children}
       </h1>
     );
   },
   h2({ children }) {
     return (
-      <h2 className="mt-7 mb-3 text-xl font-semibold tracking-tight text-zinc-100 first:mt-0">
+      <h2 className="mt-7 mb-3 text-xl font-semibold tracking-tight text-foreground first:mt-0">
         {children}
       </h2>
     );
   },
   h3({ children }) {
     return (
-      <h3 className="mt-6 mb-2 text-lg font-semibold tracking-tight text-zinc-100 first:mt-0">
+      <h3 className="mt-6 mb-2 text-lg font-semibold tracking-tight text-foreground first:mt-0">
         {children}
       </h3>
     );
   },
   h4({ children }) {
     return (
-      <h4 className="mt-5 mb-2 text-base font-semibold tracking-tight text-zinc-100 first:mt-0">
+      <h4 className="mt-5 mb-2 text-base font-semibold tracking-tight text-foreground first:mt-0">
         {children}
       </h4>
     );
   },
   ul({ children }) {
     return (
-      <ul className="my-4 list-disc space-y-1.5 pl-6 text-[15px] leading-7 text-zinc-200 marker:text-zinc-500">
+      <ul className="my-4 list-disc space-y-1.5 pl-6 text-[15px] leading-7 text-foreground marker:text-muted-foreground">
         {children}
       </ul>
     );
   },
   ol({ children }) {
     return (
-      <ol className="my-4 list-decimal space-y-1.5 pl-6 text-[15px] leading-7 text-zinc-200 marker:text-zinc-500">
+      <ol className="my-4 list-decimal space-y-1.5 pl-6 text-[15px] leading-7 text-foreground marker:text-muted-foreground">
         {children}
       </ol>
     );
@@ -141,7 +141,7 @@ const components: Components = {
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-zinc-100 underline decoration-zinc-600 underline-offset-4 transition-colors duration-150 hover:decoration-zinc-300"
+        className="text-foreground underline decoration-muted-foreground underline-offset-4 transition-colors duration-150 hover:decoration-foreground"
       >
         {children}
       </a>
@@ -149,31 +149,31 @@ const components: Components = {
   },
   blockquote({ children }) {
     return (
-      <blockquote className="my-4 border-l-2 border-zinc-700 pl-4 text-zinc-400 italic">
+      <blockquote className="my-4 border-l-2 border-ring pl-4 text-muted-foreground italic">
         {children}
       </blockquote>
     );
   },
   hr() {
-    return <hr className="my-6 border-zinc-800" />;
+    return <hr className="my-6 border-border" />;
   },
   table({ children }) {
     return (
-      <div className="my-4 overflow-x-auto rounded-lg border border-zinc-800">
+      <div className="my-4 overflow-x-auto rounded-lg border border-border">
         <table className="w-full border-collapse text-sm">{children}</table>
       </div>
     );
   },
   th({ children }) {
     return (
-      <th className="border border-zinc-800 bg-zinc-900 px-3 py-2 text-left font-medium text-zinc-200">
+      <th className="border border-border bg-muted px-3 py-2 text-left font-medium text-foreground">
         {children}
       </th>
     );
   },
   td({ children }) {
     return (
-      <td className="border border-zinc-800 px-3 py-2 text-zinc-300">
+      <td className="border border-border px-3 py-2 text-foreground/80">
         {children}
       </td>
     );
@@ -186,7 +186,7 @@ const components: Components = {
       return <code className={className}>{children}</code>;
     }
     return (
-      <code className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[13px] text-zinc-200">
+      <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[13px] text-foreground">
         {children}
       </code>
     );

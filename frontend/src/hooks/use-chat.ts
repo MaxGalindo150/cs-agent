@@ -12,7 +12,9 @@ import type {
 } from "@/lib/chat/types";
 
 // Remembers the active conversation across reloads.
-const STORAGE_KEY = "csa:conversationId";
+const DEFAULT_STORAGE_KEY = "csa:conversationId";
+
+const SEND_FAILED = "No pudimos enviar tu mensaje. Intenta de nuevo.";
 
 function newId(): string {
   // crypto.randomUUID is available in all modern browsers.
@@ -26,6 +28,10 @@ export interface UseChatOptions {
   /** The simulated host-app identity to attach to every sent message (see
    *  lib/identity/). Omit for an anonymous/guest visitor. */
   principal?: { userId: string; email?: string };
+  /** localStorage key for the active conversation id. Distinct surfaces that
+   *  share an origin (the demo page vs. the embedded widget) need distinct keys,
+   *  or one reopens the other's conversation. */
+  storageKey?: string;
 }
 
 export interface UseChat {
@@ -58,7 +64,7 @@ export interface UseChat {
  * the same conversation. `reset` starts a new thread; `load` opens an existing.
  */
 export function useChat(options: UseChatOptions = {}): UseChat {
-  const { onConversationUpdate, principal } = options;
+  const { onConversationUpdate, principal, storageKey = DEFAULT_STORAGE_KEY } = options;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -244,7 +250,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
             addStep(assistantId, {
               id: newId(),
               kind: "memory",
-              label: "Searched memory",
+              label: "Busqué en memoria",
               status: "done",
             });
           }
@@ -269,8 +275,10 @@ export function useChat(options: UseChatOptions = {}): UseChat {
             patch(assistantId, { streaming: false });
             return;
           }
-          const detail = err instanceof Error ? err.message : "unknown error";
-          patch(assistantId, { streaming: false, error: detail });
+          // The raw cause ("Failed to fetch", "request failed: 502") is for devtools,
+          // not the customer.
+          console.error("[chat] send failed", err);
+          patch(assistantId, { streaming: false, error: SEND_FAILED });
         })
         .finally(() => {
           setIsStreaming(false);
@@ -324,7 +332,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
             addStep(assistantId, {
               id: newId(),
               kind: "memory",
-              label: "Searched memory",
+              label: "Busqué en memoria",
               status: "done",
             });
           }
@@ -348,8 +356,10 @@ export function useChat(options: UseChatOptions = {}): UseChat {
             patch(assistantId, { streaming: false });
             return;
           }
-          const detail = err instanceof Error ? err.message : "unknown error";
-          patch(assistantId, { streaming: false, error: detail });
+          // The raw cause ("Failed to fetch", "request failed: 502") is for devtools,
+          // not the customer.
+          console.error("[chat] send failed", err);
+          patch(assistantId, { streaming: false, error: SEND_FAILED });
         })
         .finally(() => {
           setIsStreaming(false);
@@ -407,7 +417,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
   useEffect(() => {
     if (didRestore.current) return;
     didRestore.current = true;
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const stored = window.localStorage.getItem(storageKey);
     if (!stored) return;
     fetchMessages(stored)
       .then((msgs) => {
@@ -416,9 +426,9 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       })
       .catch(() => {
         // Stored conversation is gone (e.g. deleted) — forget it.
-        window.localStorage.removeItem(STORAGE_KEY);
+        window.localStorage.removeItem(storageKey);
       });
-  }, [setConversation]);
+  }, [setConversation, storageKey]);
 
   // Persist the active conversation. Skip the first run so mount doesn't wipe
   // the stored id before the restore effect reads it.
@@ -429,11 +439,11 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       return;
     }
     if (conversationId) {
-      window.localStorage.setItem(STORAGE_KEY, conversationId);
+      window.localStorage.setItem(storageKey, conversationId);
     } else {
-      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(storageKey);
     }
-  }, [conversationId]);
+  }, [conversationId, storageKey]);
 
   return { messages, isStreaming, conversationId, send, sendChoice, stop, reset, load };
 }

@@ -37,13 +37,13 @@ export function MessageBubble({ message, onChoice, disableChoices }: MessageBubb
               <img
                 key={i}
                 src={part.previewUrl}
-                alt="Attached"
-                className="max-h-64 rounded-2xl object-cover shadow-md shadow-black/20 ring-1 ring-white/10"
+                alt="Imagen adjunta"
+                className="max-h-64 rounded-2xl object-cover shadow-md shadow-black/20 ring-1 ring-border"
               />
             ) : part.type === "text" ? (
               <div
                 key={i}
-                className="rounded-2xl bg-zinc-800/60 px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap text-zinc-100 shadow-md shadow-black/20 ring-1 ring-white/10 backdrop-blur-sm"
+                className="rounded-2xl bg-user-bubble px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap text-user-bubble-foreground shadow-md shadow-black/5 ring-1 ring-border"
               >
                 {part.text}
               </div>
@@ -58,7 +58,7 @@ export function MessageBubble({ message, onChoice, disableChoices }: MessageBubb
   const lastIndex = message.parts.length - 1;
 
   return (
-    <div className="w-full text-zinc-200">
+    <div className="w-full text-foreground">
       {isEmptyStreaming ? (
         <TypingDots />
       ) : (
@@ -105,7 +105,7 @@ export function MessageBubble({ message, onChoice, disableChoices }: MessageBubb
 /** Blinking caret shown at the tail of a reply while it streams. */
 function StreamingCursor() {
   return (
-    <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-zinc-400 align-baseline" />
+    <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-muted-foreground align-baseline" />
   );
 }
 
@@ -116,7 +116,7 @@ function TypingDots() {
       {[0, 150, 300].map((delay) => (
         <span
           key={delay}
-          className="size-2 animate-bounce rounded-full bg-zinc-500"
+          className="size-2 animate-bounce rounded-full bg-muted-foreground"
           style={{ animationDelay: `${delay}ms` }}
         />
       ))}

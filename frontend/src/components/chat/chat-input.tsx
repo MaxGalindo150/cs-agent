@@ -65,7 +65,7 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
 
       const room = MAX_IMAGES_PER_TURN - images.length;
       if (room <= 0) {
-        setError(`You can attach up to ${MAX_IMAGES_PER_TURN} images.`);
+        setError(`Puedes adjuntar hasta ${MAX_IMAGES_PER_TURN} imágenes.`);
         return;
       }
 
@@ -83,7 +83,7 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
       if (rejected) {
         setError("Some images were skipped (unsupported type or over 5MB).");
       } else if (accepted.length < files.length) {
-        setError(`Only ${MAX_IMAGES_PER_TURN} images per message — extras were skipped.`);
+        setError(`Solo ${MAX_IMAGES_PER_TURN} imágenes por mensaje; las demás no se adjuntaron.`);
       } else {
         setError(null);
       }
@@ -141,7 +141,7 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
   }
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-2 transition-colors duration-150 focus-within:border-zinc-700">
+    <div className="rounded-2xl border border-border bg-muted p-2 transition-colors duration-150 focus-within:border-ring">
       {images.length > 0 && (
         <div className="flex flex-wrap gap-2 px-1 pt-1 pb-2">
           {images.map((img, i) => (
@@ -150,14 +150,14 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
                   object URL preview, not a static/remote asset next/image optimizes */}
               <img
                 src={img.previewUrl}
-                alt="Attached"
-                className="size-14 rounded-lg object-cover ring-1 ring-white/10"
+                alt="Imagen adjunta"
+                className="size-14 rounded-lg object-cover ring-1 ring-border"
               />
               <button
                 type="button"
                 onClick={() => removeImage(i)}
-                aria-label="Remove image"
-                className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full bg-zinc-800 text-zinc-300 opacity-0 ring-1 ring-white/10 transition-opacity group-hover:opacity-100"
+                aria-label="Quitar imagen"
+                className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full bg-secondary text-foreground/80 opacity-0 ring-1 ring-border transition-opacity group-hover:opacity-100"
               >
                 <X className="size-3" />
               </button>
@@ -184,7 +184,7 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
           className="rounded-lg"
           onClick={() => fileInputRef.current?.click()}
           disabled={isStreaming || images.length >= MAX_IMAGES_PER_TURN}
-          aria-label="Attach images"
+          aria-label="Adjuntar imágenes"
         >
           <Paperclip />
         </Button>
@@ -193,9 +193,9 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Send a message…"
+          placeholder="Escribe tu mensaje…"
           rows={1}
-          className="max-h-44 min-h-9 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-zinc-100 shadow-none placeholder:text-zinc-500 focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
+          className="max-h-44 min-h-9 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-foreground shadow-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
         />
         {isStreaming ? (
           <Button
@@ -204,7 +204,7 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
             variant="secondary"
             className="rounded-lg"
             onClick={onStop}
-            aria-label="Stop generating"
+            aria-label="Detener respuesta"
           >
             <Square className="fill-current" />
           </Button>
@@ -215,7 +215,7 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
             className="rounded-lg"
             onClick={submit}
             disabled={!canSend}
-            aria-label="Send message"
+            aria-label="Enviar mensaje"
           >
             <ArrowUp />
           </Button>

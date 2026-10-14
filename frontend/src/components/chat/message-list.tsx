@@ -3,10 +3,12 @@
 import { useEffect, useRef } from "react";
 
 import { MessageBubble } from "@/components/chat/message-bubble";
+import type { ChatCopy } from "@/components/chat/chat";
 import type { Message } from "@/lib/chat/types";
 
 interface MessageListProps {
   messages: Message[];
+  copy: ChatCopy;
   /** Send a suggested prompt from the empty state. */
   onSuggestion?: (text: string) => void;
   /** Resolve a pending `present_choice` by option id. */
@@ -15,16 +17,10 @@ interface MessageListProps {
   disableChoices?: boolean;
 }
 
-const SUGGESTIONS = [
-  "How do I reset my password?",
-  "Where is my order?",
-  "Cancel my subscription",
-  "Talk to a human",
-];
-
 /** Scrollable list of messages. Auto-scrolls to the bottom as content grows. */
 export function MessageList({
   messages,
+  copy,
   onSuggestion,
   onChoice,
   disableChoices,
@@ -50,7 +46,7 @@ export function MessageList({
   }, [messages.length, lastPartCount, lastPartSize]);
 
   if (messages.length === 0) {
-    return <EmptyState onSuggestion={onSuggestion} />;
+    return <EmptyState copy={copy} onSuggestion={onSuggestion} />;
   }
 
   return (
@@ -68,25 +64,31 @@ export function MessageList({
   );
 }
 
-function EmptyState({ onSuggestion }: { onSuggestion?: (text: string) => void }) {
+function EmptyState({
+  copy,
+  onSuggestion,
+}: {
+  copy: ChatCopy;
+  onSuggestion?: (text: string) => void;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 text-center">
       <div className="space-y-2">
-        <h2 className="text-2xl font-medium tracking-tight text-zinc-100">
-          How can I help?
+        <h2 className="text-2xl font-medium tracking-tight text-foreground">
+          {copy.greeting}
         </h2>
-        <p className="text-sm text-zinc-500">
-          Ask anything and the assistant will reply in real time.
+        <p className="text-sm text-muted-foreground">
+          {copy.subtitle}
         </p>
       </div>
 
       <div className="flex max-w-md flex-wrap justify-center gap-2">
-        {SUGGESTIONS.map((s) => (
+        {copy.suggestions.map((s) => (
           <button
             key={s}
             type="button"
             onClick={() => onSuggestion?.(s)}
-            className="rounded-full border border-zinc-800 px-3.5 py-1.5 text-sm text-zinc-400 transition-colors duration-150 hover:bg-zinc-900 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-700"
+            className="rounded-full border border-border px-3.5 py-1.5 text-sm text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {s}
           </button>

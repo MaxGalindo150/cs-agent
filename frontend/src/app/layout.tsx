@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Customer Support",
-  description: "AI customer support chat",
+  title: "Soporte Cashea",
+  description: "Chat de soporte de Cashea",
 };
 
 export default function RootLayout({
@@ -26,7 +26,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="es"
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
       <body className="h-full overflow-hidden bg-background text-foreground">

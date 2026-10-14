@@ -11,6 +11,26 @@ import { useConversations } from "@/hooks/use-conversations";
 import { deleteConversation } from "@/lib/chat/api";
 import { useIdentity } from "@/lib/identity/context";
 
+/** The words that change with who the chat is for. */
+export interface ChatCopy {
+  title: string;
+  greeting: string;
+  subtitle: string;
+  suggestions: string[];
+}
+
+const DEFAULT_COPY: ChatCopy = {
+  title: "Soporte Cashea",
+  greeting: "¿En qué puedo ayudarte?",
+  subtitle: "Escríbenos y te respondemos al momento.",
+  suggestions: [
+    "¿Dónde está mi orden?",
+    "¿Cómo pago mi cuota?",
+    "Olvidé mi contraseña",
+    "Hablar con una persona",
+  ],
+};
+
 interface ChatProps {
   /**
    * "page": standalone full-screen chat with the conversation sidebar
@@ -22,16 +42,20 @@ interface ChatProps {
    * hiding the sidebar sidesteps that for now rather than showing everyone's.
    */
   variant?: "page" | "widget";
+  /** localStorage key for the active conversation — see UseChatOptions. */
+  storageKey?: string;
+  copy?: ChatCopy;
 }
 
 /** Top-level chat screen: sidebar, header, scrollable transcript, and composer. */
-export function Chat({ variant = "page" }: ChatProps) {
+export function Chat({ variant = "page", storageKey, copy = DEFAULT_COPY }: ChatProps) {
   const isWidget = variant === "widget";
   const { conversations, refresh } = useConversations();
   const { activeUser } = useIdentity();
   const { messages, isStreaming, conversationId, send, sendChoice, stop, reset, load } =
     useChat({
       onConversationUpdate: refresh,
+      storageKey,
       principal: activeUser
         ? { userId: activeUser.id, email: activeUser.email }
         : undefined,
@@ -55,7 +79,7 @@ export function Chat({ variant = "page" }: ChatProps) {
 
   const handleDelete = useCallback(
     (id: string) => {
-      if (!window.confirm("Delete this conversation?")) return;
+      if (!window.confirm("¿Eliminar esta conversación?")) return;
       deleteConversation(id)
         .then(() => {
           if (id === conversationId) reset();
@@ -82,10 +106,11 @@ export function Chat({ variant = "page" }: ChatProps) {
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <ChatHeader
+          title={copy.title}
           onNewChat={reset}
           alwaysShowNewChat={isWidget}
           identityLabel={
-            activeUser ? `${activeUser.firstName} ${activeUser.lastName}` : "Guest"
+            activeUser ? `${activeUser.firstName} ${activeUser.lastName}` : "Invitado"
           }
         />
 
@@ -93,6 +118,7 @@ export function Chat({ variant = "page" }: ChatProps) {
           <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 py-6">
             <MessageList
               messages={messages}
+              copy={copy}
               onSuggestion={send}
               onChoice={sendChoice}
               disableChoices={isStreaming}

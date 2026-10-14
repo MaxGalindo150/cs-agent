@@ -38,7 +38,7 @@ export function ToolActivity({ steps, streaming = false }: ToolActivityProps) {
         type="button"
         onClick={() => setUserChoice(!expanded)}
         aria-expanded={expanded}
-        className="group flex items-center gap-1 rounded text-zinc-500 transition-colors duration-150 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-700"
+        className="group flex items-center gap-1 rounded text-muted-foreground transition-colors duration-150 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className={cn(streaming && "text-shimmer")}>
           {summarize(steps, streaming)}
@@ -54,7 +54,7 @@ export function ToolActivity({ steps, streaming = false }: ToolActivityProps) {
       {expanded && (
         // border-l draws the connector; each icon sits on top of it with the
         // page background, which is what makes the line look segmented.
-        <ol className="mt-2 ml-[9px] border-l border-zinc-800">
+        <ol className="mt-2 ml-[9px] border-l border-border">
           {steps.map((step) => (
             <Row
               key={step.id}
@@ -63,7 +63,7 @@ export function ToolActivity({ steps, streaming = false }: ToolActivityProps) {
               running={step.status === "running"}
             />
           ))}
-          {!streaming && <Row icon={Check} label="Done" />}
+          {!streaming && <Row icon={Check} label="Listo" />}
         </ol>
       )}
     </div>
@@ -81,31 +81,31 @@ function Row({
 }) {
   return (
     <li className="relative flex items-center gap-2.5 py-1 pl-5">
-      <span className="absolute -left-[9px] flex size-[18px] items-center justify-center rounded-full bg-background text-zinc-600">
+      <span className="absolute -left-[9px] flex size-[18px] items-center justify-center rounded-full bg-background text-muted-foreground/70">
         <Icon className="size-3.5" />
       </span>
       {/* text-shimmer paints the text with a moving gradient, so it sets its
           own color — the zinc-500 below only applies once it settles. */}
-      <span className={running ? "text-shimmer" : "text-zinc-500"}>{label}</span>
+      <span className={running ? "text-shimmer" : "text-muted-foreground"}>{label}</span>
     </li>
   );
 }
 
-/** The collapsed one-liner: "Searched memory, used 2 tools". */
+/** The collapsed one-liner: "Busqué en memoria, usé 2 herramientas". */
 function summarize(steps: ActivityStep[], streaming: boolean): string {
   if (streaming) {
     // Name what is happening right now, falling back to the last thing done.
     const running = steps.find((s) => s.status === "running");
-    return running?.label ?? steps[steps.length - 1]?.label ?? "Working";
+    return running?.label ?? steps[steps.length - 1]?.label ?? "Trabajando";
   }
 
   const parts: string[] = [];
-  if (steps.some((s) => s.kind === "memory")) parts.push("Searched memory");
+  if (steps.some((s) => s.kind === "memory")) parts.push("Busqué en memoria");
 
   const tools = steps.filter((s) => s.kind === "tool").length;
   if (tools > 0) {
-    const count = `${tools} tool${tools === 1 ? "" : "s"}`;
-    parts.push(parts.length > 0 ? `used ${count}` : `Used ${count}`);
+    const count = `${tools} herramienta${tools === 1 ? "" : "s"}`;
+    parts.push(parts.length > 0 ? `usé ${count}` : `Usé ${count}`);
   }
 
   return parts.join(", ");
