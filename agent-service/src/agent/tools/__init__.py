@@ -18,11 +18,22 @@ from agent.tools.implementations.bnpl.orders import (
 from agent.tools.implementations.bnpl.transactions import make_get_transactions_tool
 from agent.tools.implementations.escalation import make_escalate_to_human_tool
 from agent.tools.implementations.memory import make_manage_memory_tool
+from agent.tools.implementations.merchant.orders import (
+    make_get_order_detail_tool,
+    make_search_orders_tool,
+)
+from agent.tools.implementations.merchant.reports import make_get_monthly_report_tool
 from agent.tools.implementations.present_choice import make_present_choice_tool
 from agent.tools.registry import ToolRegistry
 
 
-def build_registry(bnpl_client: httpx.AsyncClient, db: Database) -> ToolRegistry:
+def build_registry(
+    bnpl_client: httpx.AsyncClient,
+    db: Database,
+    merchant_client: httpx.AsyncClient | None = None,
+) -> ToolRegistry:
+    """``merchant_client`` is Cashea's merchant API; without it the aliado
+    tools aren't registered at all (aliados then get only the shared tools)."""
     registry = ToolRegistry()
     registry.register(make_get_order_tool(bnpl_client))
     registry.register(make_get_order_shipment_tool(bnpl_client))
@@ -32,4 +43,8 @@ def build_registry(bnpl_client: httpx.AsyncClient, db: Database) -> ToolRegistry
     registry.register(make_manage_memory_tool(db))
     registry.register(make_escalate_to_human_tool(db))
     registry.register(make_present_choice_tool())
+    if merchant_client is not None:
+        registry.register(make_search_orders_tool(merchant_client))
+        registry.register(make_get_order_detail_tool(merchant_client))
+        registry.register(make_get_monthly_report_tool(merchant_client))
     return registry

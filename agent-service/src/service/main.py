@@ -109,7 +109,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db = build_database(settings)
     # Assemble the tool registry once, bound to the process-wide BNPL client
     # and the memory database.
-    app.state.registry = build_registry(app.state.bnpl, app.state.db)
+    app.state.registry = build_registry(
+        app.state.bnpl, app.state.db, app.state.merchant_api
+    )
     # The assembled Agent — the brain the request path calls. Built once;
     # nothing conversation-specific lives on it.
     app.state.embedder = build_embedder(settings)
