@@ -112,6 +112,9 @@ services:
       # Host-app login simulation (lib/identity/) reads the mock BNPL backend
       # directly from the browser — same host-resolution rule as above.
       NEXT_PUBLIC_BNPL_API_URL: http://localhost:3001
+      # Hosts allowed to iframe the widget (/embed) — merchant-web's Vite dev
+      # server locally. Read at server start by next.config.ts.
+      EMBED_FRAME_ANCESTORS: http://localhost:5173
     depends_on:
       - agent-service
       - mock-server

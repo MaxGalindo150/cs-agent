@@ -64,6 +64,22 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
   );
 }
 
+const ANONYMOUS: IdentityContextValue = {
+  users: [],
+  activeUser: null,
+  login: () => {},
+  logout: () => {},
+};
+
+/** Pins everything below it to an anonymous visitor, shadowing the demo
+ *  IdentityProvider from the root layout. Used by the embedded widget: it runs
+ *  on the same origin as the demo page, so the demo user saved in
+ *  localStorage would otherwise leak into a real host's chat. The host's own
+ *  identity (casheaChat.init({ getToken })) replaces this once it is wired. */
+export function AnonymousIdentityProvider({ children }: { children: ReactNode }) {
+  return <IdentityContext.Provider value={ANONYMOUS}>{children}</IdentityContext.Provider>;
+}
+
 export function useIdentity(): IdentityContextValue {
   const ctx = useContext(IdentityContext);
   if (!ctx) {
