@@ -9,7 +9,7 @@ across every tool and ``ToolRegistry.execute``.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from agent.identity import Principal
 
@@ -23,3 +23,10 @@ class ToolContext:
     # to mark the right chat_sessions row; not identity-gated, since an
     # anonymous visitor can still need a human ("I can't log in at all").
     session_id: uuid.UUID | None = None
+    # The aliado's own host-app credential (their Firebase ID token), for tools
+    # that read Cashea's merchant API as them — the backend then applies the
+    # aliado's own permissions. Set only for a verified aliado's chat turn
+    # (service/core/host_credential.py); lives for this turn, in memory only.
+    # repr=False so no log line, traceback or debugger dump ever prints it;
+    # tools must never echo it back in their output (which is traced).
+    host_credential: str | None = field(default=None, repr=False)

@@ -18,7 +18,11 @@ from pydantic import BaseModel, Field
 from agent.identity import Principal
 from service.core import session_token
 from service.core.config import Settings, get_settings
-from service.core.host_token import FirebaseTokenVerifier, InvalidHostToken
+from service.core.host_token import (
+    FirebaseTokenVerifier,
+    InvalidHostToken,
+    get_host_verifier,
+)
 from service.core.merchant_directory import lookup_employee
 
 log = structlog.get_logger()
@@ -35,12 +39,6 @@ class SessionResponse(BaseModel):
     session_token: str
     expires_in: int
     email: str | None
-
-
-def get_host_verifier(request: Request) -> FirebaseTokenVerifier:
-    """Dependency: the process-wide verifier (it caches Google's keys)."""
-    verifier: FirebaseTokenVerifier = request.app.state.host_verifier
-    return verifier
 
 
 def get_merchant_api(request: Request) -> httpx.AsyncClient | None:

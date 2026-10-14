@@ -42,6 +42,7 @@ from agent.app import Agent
 from agent.identity import Principal
 from service.api.v1.chat import ChatRequest, session_title
 from service.core.agent import get_agent
+from service.core.host_credential import get_host_credential
 from service.core.identity import get_principal
 from service.core.session_access import SessionAccess, get_session_access
 
@@ -62,6 +63,7 @@ async def chat_stream(
     agent: Agent = Depends(get_agent),
     principal: Principal | None = Depends(get_principal),
     access: SessionAccess = Depends(get_session_access),
+    host_credential: str | None = Depends(get_host_credential),
 ) -> StreamingResponse:
     log.info(
         "chat_stream.principal_resolved",
@@ -130,6 +132,7 @@ async def chat_stream(
                 stream=True,
                 principal=principal,
                 images=images,
+                host_credential=host_credential,
             )
             queue.put_nowait(
                 ("done", {"reply": result.reply, "needs_human": result.needs_human})

@@ -274,6 +274,7 @@ class Agent:
         stream: bool = False,
         principal: Principal | None = None,
         images: list[Image] | None = None,
+        host_credential: str | None = None,
     ) -> LoopResult:
         """One full turn: assemble working memory → run the loop → persist.
 
@@ -303,6 +304,9 @@ class Agent:
         for an anonymous visitor) — wrapped once, here, into the ``ToolContext``
         the loop forwards opaquely to ``ToolRegistry.execute``.
 
+        ``host_credential`` is the aliado's own token for the merchant tools
+        (see ``ToolContext.host_credential``) — opaque here, never stored.
+
         ``images`` are attached as vision context for THIS call only — never
         persisted or replayed into a later turn's working memory (see
         ``_user_content``/``_with_image_marker``); what's recorded instead is
@@ -325,7 +329,11 @@ class Agent:
 
         notify = compose(observer, self._tracer.event, _capture)
         t0 = time.perf_counter()
-        ctx = ToolContext(principal=principal, session_id=session_id)
+        ctx = ToolContext(
+            principal=principal,
+            session_id=session_id,
+            host_credential=host_credential,
+        )
         persisted_message = _with_image_marker(user_message or "", images)
 
         with self._tracer.turn(persisted_message, session_id=str(session_id)):

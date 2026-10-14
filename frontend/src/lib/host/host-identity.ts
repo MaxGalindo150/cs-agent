@@ -7,6 +7,8 @@
 // token over postMessage, exchanges it once at POST /v1/auth/session, and
 // sends the resulting session token on every call. The session token lives
 // only in memory; when it expires (or a call comes back 401) the cycle repeats.
+// Chat turns also carry a fresh host token (X-Host-Token) for the agent's
+// tools, which read Cashea's merchant API as this user.
 //
 // Messages are accepted only from window.parent at the exact host origin, and
 // that origin must be on NEXT_PUBLIC_EMBED_HOST_ORIGINS — the same hosts
@@ -15,7 +17,7 @@
 import { useMemo, useState } from "react";
 
 import type { ChatIdentity } from "@/components/chat/chat";
-import type { ChatAuth } from "@/lib/chat/auth";
+import type { CallPurpose, ChatAuth } from "@/lib/chat/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const ALLOWED_HOSTS = (process.env.NEXT_PUBLIC_EMBED_HOST_ORIGINS ?? "")
@@ -101,14 +103,22 @@ function createHostAuth(
   }
 
   return {
-    async headers(): Promise<Record<string, string>> {
+    async headers(purpose: CallPurpose): Promise<Record<string, string>> {
       if (!session || Date.now() >= session.expiresAt) {
         renewing ??= renew().finally(() => {
           renewing = null;
         });
         session = await renewing;
       }
-      return session ? { Authorization: `Bearer ${session.token}` } : {};
+      if (!session) return {};
+      const headers: Record<string, string> = { Authorization: `Bearer ${session.token}` };
+      if (purpose === "chat") {
+        // A fresh one per turn (the host's SDK caches and refreshes it), so the
+        // agent's tools can act as this user for this turn only.
+        const hostToken = await requestHostToken(hostOrigin);
+        if (hostToken) headers["X-Host-Token"] = hostToken;
+      }
+      return headers;
     },
     invalidate() {
       session = null;

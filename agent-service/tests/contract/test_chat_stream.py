@@ -65,6 +65,7 @@ class _StreamAgent:
         stream: bool = False,
         principal: Principal | None = None,
         images: list[Image] | None = None,
+        host_credential: str | None = None,
     ) -> LoopResult:
         self.received_principal = principal
         self.received_images = images
@@ -247,6 +248,7 @@ class _ChoiceAgent:
         stream: bool = False,
         principal: Principal | None = None,
         images: list[Image] | None = None,
+        host_credential: str | None = None,
     ) -> LoopResult:
         assert observer is not None
         observer(
@@ -302,6 +304,7 @@ class _CrashAgent:
         stream: bool = False,
         principal: Principal | None = None,
         images: list[Image] | None = None,
+        host_credential: str | None = None,
     ) -> LoopResult:
         raise RuntimeError("sdk blew up")
 
@@ -349,6 +352,7 @@ class _ToolAgent:
         stream: bool = False,
         principal: Principal | None = None,
         images: list[Image] | None = None,
+        host_credential: str | None = None,
     ) -> LoopResult:
         assert observer is not None
         observer(

@@ -20,6 +20,7 @@ from typing import Any
 
 import jwt
 import structlog
+from fastapi import Request
 
 log = structlog.get_logger()
 
@@ -79,3 +80,9 @@ class FirebaseTokenVerifier:
             raise InvalidHostToken("auth_time is in the future")
 
         return HostIdentity(uid=claims["sub"], email=claims.get("email"))
+
+
+def get_host_verifier(request: Request) -> FirebaseTokenVerifier:
+    """Dependency: the process-wide verifier (it caches Google's keys)."""
+    verifier: FirebaseTokenVerifier = request.app.state.host_verifier
+    return verifier

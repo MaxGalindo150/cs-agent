@@ -6,10 +6,15 @@
 // agent-service goes through `authedFetch`, so neither the API client nor the
 // hooks know which one is in use.
 
+/** What a call is for. A chat turn may need more than identifying the caller:
+ *  the embed also sends the host user's own token so the agent's tools can
+ *  read Cashea's API as them (lib/host/). Other calls never carry it. */
+export type CallPurpose = "chat" | "api";
+
 export interface ChatAuth {
   /** Headers that identify the caller. May do network work (renewing a
    *  token), so it is async; an empty object means anonymous. */
-  headers(): Promise<Record<string, string>>;
+  headers(purpose: CallPurpose): Promise<Record<string, string>>;
   /** Drop any cached credential after a 401, so the next `headers()` renews. */
   invalidate?(): void;
 }
@@ -20,9 +25,13 @@ export async function authedFetch(
   url: string,
   init: RequestInit = {},
   auth?: ChatAuth,
+  purpose: CallPurpose = "api",
 ): Promise<Response> {
   const send = async () =>
-    fetch(url, { ...init, headers: { ...init.headers, ...(await auth?.headers()) } });
+    fetch(url, {
+      ...init,
+      headers: { ...init.headers, ...(await auth?.headers(purpose)) },
+    });
 
   const res = await send();
   if (res.status !== 401 || !auth?.invalidate) return res;

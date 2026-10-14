@@ -118,6 +118,7 @@ export async function streamChat({
       signal,
     },
     auth,
+    "chat",
   );
 
   if (!res.ok) {

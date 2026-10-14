@@ -76,6 +76,7 @@ class _FakeAgent:
         stream: bool = False,
         principal: Principal | None = None,
         images: list[Image] | None = None,
+        host_credential: str | None = None,
     ) -> LoopResult:
         self.received_principal = principal
         self.received_images = images
@@ -375,6 +376,7 @@ class _BoomAgent:
         stream: bool = False,
         principal: Principal | None = None,
         images: list[Image] | None = None,
+        host_credential: str | None = None,
     ) -> LoopResult:
         raise anthropic.APIError(
             "upstream boom", httpx.Request("POST", "http://test"), body=None

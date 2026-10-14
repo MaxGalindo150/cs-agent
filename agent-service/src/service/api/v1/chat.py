@@ -21,6 +21,7 @@ from agent.app import Agent
 from agent.identity import Principal
 from agent.vision import Image
 from service.core.agent import get_agent
+from service.core.host_credential import get_host_credential
 from service.core.identity import get_principal
 from service.core.session_access import SessionAccess, get_session_access
 
@@ -176,6 +177,7 @@ async def chat(
     agent: Agent = Depends(get_agent),
     principal: Principal | None = Depends(get_principal),
     access: SessionAccess = Depends(get_session_access),
+    host_credential: str | None = Depends(get_host_credential),
 ) -> ChatResponse:
     log.info(
         "chat.principal_resolved",
@@ -203,6 +205,7 @@ async def chat(
         source="api",
         principal=principal,
         images=images,
+        host_credential=host_credential,
     )
     choice_segment = next(
         (seg for seg in reversed(result.segments) if seg.get("type") == "choice"), None
