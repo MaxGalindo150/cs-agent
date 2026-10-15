@@ -137,10 +137,61 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  jev-eval:
+    # Level-2 eval of the harness's decision sites against the real decision
+    # model (ADR-0004): replays evals/jev/cases.jsonl and fails when any site
+    # scores under the accuracy floor. Needs the TYPESAFE_API_KEY secret; a
+    # fork PR has none, so the step reports "skipped" instead of failing —
+    # the deterministic harness tests in `test` still run either way.
+    name: Decision-model eval (Jev replay)
+    needs: changes
+    if: needs.changes.outputs.agent-service == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - name: Sync dependencies
+        run: uv sync --locked --extra dev
+      - name: Replay the labelled set against Jev
+        env:
+          ANTHROPIC_API_KEY: not-used-by-the-replay
+          VOYAGE_API_KEY: not-used-by-the-replay
+        run: |
+          if [[ -z "$TYPESAFE_API_KEY" ]]; then
+            echo "::notice::TYPESAFE_API_KEY not available — Jev replay skipped."
+            echo "## Decision-model eval" >> "$GITHUB_STEP_SUMMARY"
+            echo "_Skipped: no TYPESAFE_API_KEY in this context._" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          uv run python scripts/jev_replay.py --min-accuracy 0.8 --out jev-replay.json | tee replay.txt
+          {
+            echo "## Decision-model eval (Jev replay)"
+            echo
+            echo '```'
+            cat replay.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload replay report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jev-replay-report
+          path: agent-service/jev-replay.json
+          if-no-files-found: ignore
+          retention-days: 14
+
   ci-green:
     name: Agent Service CI Green
     runs-on: ubuntu-latest
-    needs: [changes, lint, typecheck, test]
+    needs: [changes, lint, typecheck, test, jev-eval]
     if: always()
     defaults:
       run:
@@ -160,11 +211,13 @@ jobs:
 
           if [[ "${{ needs.lint.result }}" != "success" \
              || "${{ needs.typecheck.result }}" != "success" \
-             || "${{ needs.test.result }}" != "success" ]]; then
+             || "${{ needs.test.result }}" != "success" \
+             || "${{ needs.jev-eval.result }}" != "success" ]]; then
             echo "One or more required jobs failed."
             echo "lint=${{ needs.lint.result }}"
             echo "typecheck=${{ needs.typecheck.result }}"
             echo "test=${{ needs.test.result }}"
+            echo "jev-eval=${{ needs.jev-eval.result }}"
             exit 1
           fi
           echo "All required jobs passed."
