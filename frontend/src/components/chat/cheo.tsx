@@ -27,6 +27,10 @@ export function Cheo({ mood = "idle", size = 24, className }: CheoProps) {
       mood={ORB_MOOD[mood]}
       live={mood === "working"}
       className={className}
+      // The element marks itself aria-hidden on upgrade (no label = decorative),
+      // before React hydrates. Rendering it from the server too keeps the
+      // markup identical and avoids a hydration mismatch.
+      aria-hidden="true"
     />
   );
 }
