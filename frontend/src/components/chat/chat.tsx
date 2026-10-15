@@ -142,7 +142,11 @@ export function Chat({
           mood={cheoMood}
         />
 
-        <div className="flex-1 overflow-y-auto">
+        {/* relative: the containing block for absolutely positioned content
+            (sr-only text). Without it that content is placed against the
+            page, below the scrolled transcript, and stretches the iframe's
+            document, which the auto-scroll then scrolls into a blank gap. */}
+        <div className="relative flex-1 overflow-y-auto">
           <div
             className={cn(
               "mx-auto flex h-full w-full max-w-3xl flex-col px-4",
