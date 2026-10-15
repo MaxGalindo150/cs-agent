@@ -9,10 +9,10 @@ const MERCHANT_COPY: ChatCopy = {
   greeting: "¡Hola, aliado!",
   subtitle: "¿En qué puedo ayudarte hoy?",
   suggestions: [
-    "¿Cuándo recibo mis pagos?",
-    "¿Cómo anulo una orden?",
-    "¿Cómo agrego un empleado?",
-    "Hablar con una persona",
+    "¿Cuáles son mis últimas órdenes?",
+    "¿Cómo va el cierre de caja de hoy?",
+    "¿Cómo creo una orden con Link?",
+    "¿Cómo cancelo una orden?",
   ],
 };
 
