@@ -7,7 +7,6 @@ import { ChatInput } from "@/components/chat/chat-input";
 import type { CheoMood } from "@/components/chat/cheo";
 import { ConversationSidebar } from "@/components/chat/conversation-sidebar";
 import { MessageList } from "@/components/chat/message-list";
-import { isRunningTool } from "@/components/chat/tool-activity";
 import { useChat } from "@/hooks/use-chat";
 import { useConversations } from "@/hooks/use-conversations";
 import { deleteConversation } from "@/lib/chat/api";
@@ -178,12 +177,16 @@ export function Chat({
   );
 }
 
-/** Cheo in the header: working while a tool runs, attentive until the reply
- *  starts to show, then back to floating while it's written out. */
+/** Cheo in the header: attentive for the moment before the agent shows any
+ *  activity, working from its first step (memory, a tool, deciding what to
+ *  say) until the reply starts to show, floating while it's written out —
+ *  and working again if a step runs mid-reply. */
 function moodFor(last: Message | undefined, isStreaming: boolean): CheoMood {
   if (!isStreaming || !last) return "idle";
-  const parts = last.parts;
-  if (parts.some((p) => p.type === "steps" && p.steps.some(isRunningTool))) return "working";
-  if (!parts.some((p) => p.type === "text" && p.text.trim())) return "attentive";
+  const steps = last.parts.flatMap((p) => (p.type === "steps" ? p.steps : []));
+  if (steps.some((s) => s.status === "running")) return "working";
+  if (!last.parts.some((p) => p.type === "text" && p.text.trim())) {
+    return steps.length > 0 ? "working" : "attentive";
+  }
   return "idle";
 }

@@ -57,11 +57,15 @@ export function Cheo({ mood = "idle", className }: CheoProps) {
         ry="3.6"
         filter={`url(#${soft})`}
       />
-      {/* Orbits the middle of the cloud while working: top, right, bottom. */}
-      <g className="cheo-orbit" fill={`url(#${fill})`}>
-        <circle cx="64" cy="8" r="5" />
-        <circle cx="118" cy="54" r="4" />
-        <circle cx="64" cy="100" r="3.4" />
+      {/* Two trails of little clouds that orbit the middle while working.
+          Each trail leads with its biggest puff (clockwise spin). */}
+      <g className="cheo-orbit">
+        <circle cx="64" cy="2" r="9" />
+        <circle cx="39.6" cy="8.1" r="7" />
+        <circle cx="23" cy="22" r="5" />
+        <circle cx="64" cy="106" r="9" />
+        <circle cx="88.4" cy="99.9" r="7" />
+        <circle cx="105" cy="86" r="5" />
       </g>
       <g className="cheo-body">
         {LOBES.map(([cx, cy, r]) => (
