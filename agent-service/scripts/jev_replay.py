@@ -104,49 +104,51 @@ async def _run_case(
     confidence: float | None = None
 
     if site == "retrieval":
-        v = await d.retrieval(case["message"], notify)
-        assert v is not None
-        got = {"retrieve": v.retrieve, "p": round(v.p_needs_history, 2)}
-        correct = v.retrieve == want["retrieve"]
-        confidence = abs(v.p_needs_history - 0.5) * 2
+        rv = await d.retrieval(case["message"], notify)
+        assert rv is not None
+        got = {"retrieve": rv.retrieve, "p": round(rv.p_needs_history, 2)}
+        correct = rv.retrieve == want["retrieve"]
+        confidence = abs(rv.p_needs_history - 0.5) * 2
     elif site == "skill_match":
-        v = await d.skill_match(case["message"], skills, [], notify)
-        picked = v.skills[0] if v.skills else None
-        got = {"skill": picked, "confidence": round(v.confidence, 2)}
+        sv = await d.skill_match(case["message"], skills, [], notify)
+        picked = sv.skills[0] if sv.skills else None
+        got = {"skill": picked, "confidence": round(sv.confidence, 2)}
         correct = picked == want["skill"]
-        confidence = v.confidence
+        confidence = sv.confidence
     elif site == "tool_review":
-        v = await d.tool_review(
+        tv = await d.tool_review(
             case["conversation"],
             case["call"]["tool"],
             case["call"]["args"],
             tools,
             notify,
         )
-        assert v is not None
+        assert tv is not None
         got = {
-            "fits": v.p_fits >= 0.5,
-            "p_fits": round(v.p_fits, 2),
-            "best_tool": v.best_tool,
-            "confidence": round(v.best_confidence, 2),
-            "nudged": v.suggestion is not None,
+            "fits": tv.p_fits >= 0.5,
+            "p_fits": round(tv.p_fits, 2),
+            "best_tool": tv.best_tool,
+            "confidence": round(tv.best_confidence, 2),
+            "nudged": tv.suggestion is not None,
         }
-        correct = (v.p_fits >= 0.5) == want["fits"] and v.best_tool == want["best_tool"]
-        confidence = v.best_confidence
+        correct = (tv.p_fits >= 0.5) == want["fits"] and (
+            tv.best_tool == want["best_tool"]
+        )
+        confidence = tv.best_confidence
     elif site == "ask_or_act":
-        v = await d.ask_or_act(
+        av = await d.ask_or_act(
             case["conversation"],
             case["prompt"],
             [{"label": o} for o in case["options"]],
             tools,
             notify,
         )
-        assert v is not None
-        got = {"action": v.action, "confidence": round(v.confidence, 2)}
-        correct = v.action == want["action"]
-        confidence = v.confidence
+        assert av is not None
+        got = {"action": av.action, "confidence": round(av.confidence, 2)}
+        correct = av.action == want["action"]
+        confidence = av.confidence
     elif site == "judge":
-        v = await d.judge_turn(
+        jv = await d.judge_turn(
             case["user_message"],
             case["reply"],
             case["tools_used"],
@@ -154,14 +156,16 @@ async def _run_case(
             case["audience"],
             notify,
         )
-        assert v is not None
-        level = round(v.quality)  # the expected level, read as the nearest rubric level
+        assert jv is not None
+        level = round(
+            jv.quality
+        )  # the expected level, read as the nearest rubric level
         got = {
-            "quality": round(v.quality, 2),
+            "quality": round(jv.quality, 2),
             "level": level,
-            "confidence": round(v.quality_confidence, 2),
-            "grounded": v.p_grounded >= 0.5,
-            "llm_judge": v.needs_llm_judge,
+            "confidence": round(jv.quality_confidence, 2),
+            "grounded": jv.p_grounded >= 0.5,
+            "llm_judge": jv.needs_llm_judge,
         }
         correct = True
         if "quality_min" in want:
@@ -169,18 +173,18 @@ async def _run_case(
         if "quality_max" in want:
             correct &= level <= want["quality_max"]
         if "grounded" in want:
-            correct &= (v.p_grounded >= 0.5) == want["grounded"]
-        confidence = v.quality_confidence
+            correct &= (jv.p_grounded >= 0.5) == want["grounded"]
+        confidence = jv.quality_confidence
     elif site == "fact_select":
-        v = await d.fact_select(case["facts"], case["existing"], notify)
-        kept = [case["facts"].index(f) for f in v.kept]
+        fv = await d.fact_select(case["facts"], case["existing"], notify)
+        kept = [case["facts"].index(f) for f in fv.kept]
         got = {"keep": kept}
         correct = kept == want["keep"]
     elif site == "consolidation_gate":
-        v = await d.consolidation_gate(case["log"], notify)
-        got = {"proceed": v.proceed, "p": round(v.p_worth_it, 2)}
-        correct = v.proceed == want["proceed"]
-        confidence = abs(v.p_worth_it - 0.5) * 2
+        cv = await d.consolidation_gate(case["log"], notify)
+        got = {"proceed": cv.proceed, "p": round(cv.p_worth_it, 2)}
+        correct = cv.proceed == want["proceed"]
+        confidence = abs(cv.p_worth_it - 0.5) * 2
     else:
         raise ValueError(f"unknown site {site}")
 

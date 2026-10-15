@@ -186,7 +186,10 @@ Target: 80%+ coverage on business logic.
 
 ## 11. Pointers
 
-- Architecture decisions: `docs/ADR/` (start at `0001-agent-architecture-harness.md`).
+- Architecture decisions: `docs/ADR/` (start at `0001-agent-architecture-harness.md`;
+  `0004-typed-decisions-jev.md` is the decision model behind the harness's judgment calls).
 - Security notes (known limitations, accepted risks, their fix conditions): `docs/SECURITY.md`.
+- Decision model (Jev) — how to test each site, read the `decision`/`score` trace records and
+  measure: `docs/jev-runbook.md`; the labelled set is `evals/jev/cases.jsonl`.
 - Runbook (3am): `docs/runbook.md` (planned).
 - Parent monorepo docs (`../docs/*`) describe the retired Go platform and are being realigned — treat them as historical until updated.

@@ -74,6 +74,40 @@ search across, another user's facts/episodes.
 
 ---
 
+## 4. Conversation text is sent to a second model provider (the decision model)
+
+**What:** with `TYPESAFE_API_KEY` set, the harness's judgment calls (ADR-0004)
+go to TypeSafe AI's Jev over HTTPS: whether to retrieve memory, which skill
+applies, whether a tool call fits, whether to ask or act, how good a reply
+was, where a thumbs-down came from, what to keep from a conversation.
+
+**What leaves the process, per call:** the user's current message; a
+text-only window of the last 8 conversation entries with tool *arguments*
+included and tool *outputs* truncated to 600 characters; the retrieved memory
+rows under review; for the judge and the diagnosis, the assistant's reply and
+a short excerpt of the tool outputs; for consolidation, the raw exchanges and
+the candidate facts. Images are reduced to a `[image]` marker — never bytes.
+Never the full history, never the system prompt, never the aliado's host
+credential (`ToolContext.host_credential` is not part of any state).
+
+**Trust class:** the same as the LLM provider — a third party that sees
+customer and aliado text. The TLS certificate chain is the system's (locally
+a Cloudflare Zero Trust CA is needed, see `docs/jev-runbook.md` §0).
+
+**Accepted for the proof of concept.** Fix conditions, any of which must be
+met before production traffic:
+
+- A data-processing agreement with TypeSafe AI covering Cashea customer and
+  aliado data, or a self-hosted deployment of the model.
+- PII scrubbing on the `state` before it is sent (the same redaction the
+  observer stream will get), so a buyer's name or ID number in a tool output
+  never reaches the second provider.
+- `SSL_CERT_FILE` must never point at a bundle that includes an
+  interception CA in a deployed environment; it is a local-development
+  workaround only.
+
+---
+
 ## Referenced from
 
 - `src/service/core/identity.py` — identity resolution (bearer, then dev headers).
@@ -85,3 +119,6 @@ search across, another user's facts/episodes.
 - `src/agent/tools/registry.py` — `Tool.requires_identity` gate (the pattern
   item 3's future write path must reuse).
 - `docs/ADR/0002-memory-and-session-persistence.md` — session persistence.
+- `docs/ADR/0004-typed-decisions-jev.md` — what the decision model is asked
+  and what it is sent (§4 above); `src/agent/decide/sites.py` builds every
+  `state`.
