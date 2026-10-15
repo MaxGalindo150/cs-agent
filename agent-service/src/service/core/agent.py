@@ -14,6 +14,7 @@ from anthropic import AsyncAnthropic
 from fastapi import Request
 
 from agent.app import Agent, build_agent
+from agent.decide.jev import JevClient, JevConfig
 from agent.memory.db import Database, DatabaseConfig
 from agent.memory.embeddings import Embedder, VoyageEmbedder
 from agent.tools.registry import ToolRegistry
@@ -35,6 +36,23 @@ def build_embedder(settings: Settings) -> VoyageEmbedder:
     )
 
 
+def build_decider(settings: Settings) -> JevClient | None:
+    """Process-wide client for the harness's decision model (ADR-0004), or
+    ``None`` when no key is configured — which disables every decision site
+    and leaves the harness exactly as it was. Owns an httpx client; closed at
+    shutdown like the embedder."""
+    if not settings.typesafe_api_key:
+        return None
+    return JevClient(
+        JevConfig(
+            api_key=settings.typesafe_api_key,
+            model=settings.jev_model,
+            base_url=settings.jev_base_url,
+            timeout_s=settings.jev_timeout_s,
+        )
+    )
+
+
 def build_service_agent(
     settings: Settings,
     *,
@@ -42,6 +60,7 @@ def build_service_agent(
     db: Database,
     tools: ToolRegistry,
     embedder: Embedder | None,
+    decider: JevClient | None = None,
 ) -> Agent:
     """Assemble the Agent from process-wide parts via the brain-side factory."""
     return build_agent(
@@ -53,12 +72,24 @@ def build_service_agent(
         trace_dir=settings.trace_dir,
         otel_endpoint=settings.otel_endpoint or None,
         embedder=embedder,
+        decider=decider,
+        decision_threshold=settings.jev_confidence_threshold,
+        max_tool_calls=settings.max_tool_calls_per_turn,
+        max_turn_tokens=settings.max_tokens_per_turn,
     )
 
 
 def get_agent(request: Request) -> Agent:
     """Dependency: the process-wide Agent assembled at startup."""
     agent: Agent = request.app.state.agent
+    return agent
+
+
+def get_agent_optional(request: Request) -> Agent | None:
+    """Dependency for routes that *can* use the Agent but must keep working
+    without one (the feedback route, the worker): ``None`` when the app was
+    built without a lifespan, as the transport-only tests do."""
+    agent: Agent | None = getattr(request.app.state, "agent", None)
     return agent
 
 

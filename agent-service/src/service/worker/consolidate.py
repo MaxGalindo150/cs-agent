@@ -15,9 +15,10 @@ import structlog
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
+from agent.app import Agent
 from agent.memory.consolidation import ConsolidationResult, consolidate_all_due_users
 from agent.memory.db import Database
-from service.core.agent import get_database
+from service.core.agent import get_agent_optional, get_database
 from service.core.config import Settings, get_settings
 from service.core.llm import get_llm_client
 
@@ -49,11 +50,14 @@ async def consolidate(
     db: Database = Depends(get_database),
     client: AsyncAnthropic = Depends(get_llm_client),
     settings: Settings = Depends(get_settings),
+    agent: Agent | None = Depends(get_agent_optional),
 ) -> dict[str, ConsolidationResult]:
     """Sweep up to a batch of due users; returns new facts/episodes written
     per user_id (0/0 for a user swept but not yet due). A backlog larger than
     the batch is left for the next periodic trigger — see agent/memory/
     consolidation.py for why this is bounded rather than exhaustive."""
+    # The same decision model and trace sink the turns use (ADR-0004), so a
+    # consolidation gate decision is read next to the turn decisions.
     results = await consolidate_all_due_users(
         db,
         client,
@@ -61,11 +65,15 @@ async def consolidate(
         settings.consolidate_every,
         settings.consolidate_batch_size,
         settings.consolidate_concurrency,
+        decisions=agent.decisions if agent is not None else None,
+        notify=agent.tracer.event if agent is not None else None,
     )
     log.info(
         "consolidation.swept",
         users_checked=len(results),
         new_facts=sum(r.facts for r in results.values()),
         new_episodes=sum(r.episodes for r in results.values()),
+        skipped=sum(1 for r in results.values() if r.skipped),
+        dropped_facts=sum(r.dropped_facts for r in results.values()),
     )
     return results

@@ -26,12 +26,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.tools import build_registry
+from agent.tools.implementations.propose_skill import make_propose_skill_tool
 from service import SERVICE_NAME, __version__
 from service.api.errors import handle_provider_error
 from service.api.health import router as health_router
 from service.api.v1.router import router as v1_router
 from service.core.agent import (
     build_database,
+    build_decider,
     build_embedder,
     build_service_agent,
 )
@@ -115,12 +117,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # The assembled Agent — the brain the request path calls. Built once;
     # nothing conversation-specific lives on it.
     app.state.embedder = build_embedder(settings)
+    # The harness's decision model (ADR-0004): one client shared by every
+    # decision site, or None when TYPESAFE_API_KEY is empty.
+    app.state.decider = build_decider(settings)
     app.state.agent = build_service_agent(
         settings,
         client=app.state.llm,
         db=app.state.db,
         tools=app.state.registry,
         embedder=app.state.embedder,
+        decider=app.state.decider,
+    )
+    if settings.skill_proposals_enabled:
+        # Registered after the Agent exists because the proposal gate needs
+        # its memory (the conversation, the skill catalogue) and its decision
+        # model. Flag-gated: see Settings.skill_proposals_enabled.
+        app.state.registry.register(
+            make_propose_skill_tool(app.state.agent.memory, app.state.agent.decisions)
+        )
+    log.info(
+        "decisions.configured",
+        enabled=app.state.decider is not None,
+        model=settings.jev_model if app.state.decider else None,
+        threshold=settings.jev_confidence_threshold,
+        skill_proposals=settings.skill_proposals_enabled,
     )
     try:
         yield
@@ -129,6 +149,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.bnpl.aclose()
         if app.state.merchant_api is not None:
             await app.state.merchant_api.aclose()
+        if app.state.decider is not None:
+            await app.state.decider.aclose()
         await app.state.embedder.aclose()
         await app.state.db.dispose()
         log.info("service.stop", service=SERVICE_NAME)

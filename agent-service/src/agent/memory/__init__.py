@@ -6,7 +6,13 @@
 
 Plus the agents that manage them:
     retrieval_gate   decides IF a turn needs memory   (hero moment #1)
-    consolidation    distils chats into facts         (later — not yet ported)
+    consolidation    distils chats into facts         (service/worker)
+
+With a decision model wired (``decisions``, ADR-0004) three of the facade's
+judgment calls go through it: whether to retrieve at all and from which
+store (replacing the Haiku gate), which of the retrieved rows stay, and
+which skill applies (replacing keyword overlap). Each has the previous
+method as its fallback, so without a decider nothing here changes.
 
 Provider- and transport-neutral by construction (CLAUDE.md §4): nothing here
 imports ``service``, and the facade never reads the service ``Settings`` object.
@@ -29,10 +35,11 @@ from typing import Any
 
 from anthropic import AsyncAnthropic
 
+from agent.decide.sites import Decisions
 from agent.memory.db import Database
 from agent.memory.embeddings import Embedder
 from agent.memory.episodic.store import PostgresEpisodeStore
-from agent.memory.procedural.loader import SkillLoader
+from agent.memory.procedural.loader import Skill, SkillLoader
 from agent.memory.repositories import SessionRepository
 from agent.memory.retrieval_gate import should_retrieve
 from agent.memory.semantic.store import PostgresFactStore
@@ -64,10 +71,14 @@ class Memory:
         client: AsyncAnthropic,
         config: MemoryConfig,
         embedder: Embedder | None = None,
+        decisions: Decisions | None = None,
     ) -> None:
         self._db = db
         self._client = client
         self._config = config
+        # The harness's decision model (ADR-0004). ``None`` or a disabled
+        # facade → the Haiku gate and the keyword matcher run as before.
+        self._decisions = decisions or Decisions(None)
         # With no embedder, semantic memory degrades to full-text search — the
         # service still runs, just without paraphrase matching (ADR-0003 §7).
         self.facts = PostgresFactStore(db, embedder)
@@ -87,17 +98,31 @@ class Memory:
     ) -> str:
         """Fetch relevant memory for a turn — but only if the gate says to.
 
-        The gate is one cheap LLM call and touches no DB; the search that
-        follows opens a short session and closes it. They run in sequence, never
-        overlapping, so no connection is ever held across the LLM call.
+        The gate touches no DB; the search that follows opens a short session
+        and closes it. They run in sequence, never overlapping, so no
+        connection is ever held across a model call.
+
+        With a decision model, the gate is one Jev call (``needs_history`` +
+        which store) and the search runs on the message itself; the rows that
+        come back are then re-ranked one by one (``memory_select``) so only
+        what is relevant enters the prompt. Without one — or when the call
+        fails — the Haiku gate decides and everything found goes in, exactly
+        as before.
 
         ``user_id`` scopes both stores to one owner (docs/SECURITY.md §3) — it
         is required, not defaulted away, so a caller can never forget to pass
         it and accidentally search across every user's memory.
         """
-        retrieve, query, reason = await should_retrieve(
-            self._client, self._config.fast_model, message
-        )
+        verdict = await self._decisions.retrieval(message, notify)
+        if verdict is not None:
+            retrieve, query = verdict.retrieve, message
+            reason = f"jev p={verdict.p_needs_history:.2f}"
+            search_facts, search_episodes = verdict.facts, verdict.episodes
+        else:
+            retrieve, query, reason = await should_retrieve(
+                self._client, self._config.fast_model, message
+            )
+            search_facts = search_episodes = retrieve
         if notify:
             notify(
                 "gate",
@@ -105,19 +130,60 @@ class Memory:
             )
         if not retrieve:
             return ""
-        found = await self.facts.search(query, user_id, self._config.retrieval_top_k)
-        found += await self.episodes.search(query, user_id, self._config.episode_top_k)
+        found: list[str] = []
+        if search_facts:
+            found += await self.facts.search(
+                query, user_id, self._config.retrieval_top_k
+            )
+        if search_episodes:
+            found += await self.episodes.search(
+                query, user_id, self._config.episode_top_k
+            )
+        if verdict is not None and found:
+            found = (await self._decisions.memory_select(message, found, notify)).kept
         return "\n".join(found)
 
     # ---- procedural --------------------------------------------------------
-    def matching_skills(self, message: str, audience: str = "consumer") -> str:
-        """Procedural memory: the bodies of this audience's SKILL.md policies
-        whose name+description overlaps this message (progressive disclosure).
-        Empty when nothing matches — or when there are no skills yet."""
+    def _loader(self, audience: str) -> SkillLoader:
         loader = self.skills.get(audience)
         if loader is None:
             loader = self.skills[audience] = SkillLoader([REPO_SKILLS / audience])
-        matched = loader.match(message)
+        return loader
+
+    def skill_catalog(self, audience: str) -> list[tuple[str, str]]:
+        """Every skill this audience has, as (name, description) — the
+        trigger text, never the bodies."""
+        loader = self._loader(audience)
+        loader.match("")  # cheap re-scan if a SKILL.md changed on disk
+        return [(s.name, s.description) for s in loader.skills]
+
+    async def select_skills(
+        self, message: str, audience: str = "consumer", notify: Observer | None = None
+    ) -> list[Skill]:
+        """Procedural memory: which of this audience's SKILL.md policies apply
+        to this message (progressive disclosure). With a decision model, one
+        ``choice`` over the skill descriptions picks at most one — or none;
+        the keyword matcher is the baseline it is measured against and the
+        fallback when it is unsure. Empty when nothing applies."""
+        loader = self._loader(audience)
+        baseline = loader.match(message)
+        verdict = await self._decisions.skill_match(
+            message,
+            [(s.name, s.description) for s in loader.skills],
+            [s.name for s in baseline],
+            notify,
+        )
+        if verdict.source != "jev":
+            return baseline
+        by_name = {s.name: s for s in loader.skills}
+        return [by_name[name] for name in verdict.skills if name in by_name]
+
+    async def matching_skills(
+        self, message: str, audience: str = "consumer", notify: Observer | None = None
+    ) -> str:
+        """The bodies of the skills ``select_skills`` picked, as one prompt
+        section. Empty when nothing matches — or when there are no skills."""
+        matched = await self.select_skills(message, audience, notify)
         return "\n\n".join(f"### {s.name}\n{s.body}" for s in matched)
 
     # ---- sessions & chat log ----------------------------------------------
@@ -179,6 +245,22 @@ class Memory:
                     pairs.append((pending, message.content))
                     pending = None
             return pairs
+
+    async def turn_of(
+        self, session_id: uuid.UUID, message_id: uuid.UUID
+    ) -> tuple[str, str, dict[str, Any]] | None:
+        """The (user message, reply, meta) of one logged assistant reply —
+        what a diagnosis of a thumbs-down needs. ``None`` if the id isn't a
+        reply of this session."""
+        async with self._db.session() as session:
+            messages = await SessionRepository(session).list_messages(session_id)
+        previous_user: str | None = None
+        for message in messages:
+            if message.role == "user":
+                previous_user = message.content
+            elif message.id == message_id:
+                return previous_user or "", message.content, message.meta or {}
+        return None
 
     async def list_sessions(self, limit: int = 50) -> list[dict[str, object]]:
         """One row per conversation, most recently active first — the order a

@@ -26,10 +26,11 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.app import Agent
 from agent.identity import Principal
 from agent.memory.db import Database
 from agent.memory.repositories import FeedbackRepository, SessionRepository
-from service.core.agent import get_database
+from service.core.agent import get_agent_optional, get_database
 from service.core.identity import get_principal
 from service.core.session_access import SessionAccess
 
@@ -140,21 +141,31 @@ async def rate_message(
     body: FeedbackIn,
     db: Database = Depends(get_database),
     principal: Principal | None = Depends(get_principal),
+    agent: Agent | None = Depends(get_agent_optional),
 ) -> Response:
     """Thumbs up/down on one of the caller's assistant replies; rating again
     replaces the vote. 404 when the session isn't the caller's or the
-    message isn't a reply in it."""
+    message isn't a reply in it.
+
+    The vote is also recorded as a ``score`` on the message (the LLM-Ops
+    feedback loop, ADR-0004), and a thumbs-down gets a diagnosis of where
+    the harness most likely failed — after the DB write, so a tracing
+    hiccup can never lose the vote."""
     await SessionAccess(lambda: db).require(session_id, principal)
+    rating = 1 if body.rating == "up" else -1
+    comment = (body.comment or "").strip() or None
     async with db.session() as session:
         rated = await FeedbackRepository(session).rate(
             session_id,
             message_id,
             user_id=principal.user_id if principal else None,
-            rating=1 if body.rating == "up" else -1,
-            comment=(body.comment or "").strip() or None,
+            rating=rating,
+            comment=comment,
         )
     if not rated:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found.")
+    if agent is not None:
+        await agent.record_feedback(session_id, message_id, rating, comment)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

@@ -89,6 +89,41 @@ class Settings(BaseSettings):
         alias="ANTHROPIC_CHAT_FALLBACK_MODEL",
     )
 
+    # --- Decision model (harness judgment calls, ADR-0004) ---
+    # TypeSafe AI's Jev makes the harness's typed decisions with calibrated
+    # confidence. Empty key = no decider: every decision site is a no-op and
+    # the harness behaves exactly as before (Haiku gate, keyword skills,
+    # unreviewed tool calls, no judge). Injected into the brain as a Decider;
+    # agent/ never reads these fields (CLAUDE.md §4).
+    typesafe_api_key: str = Field(default="", alias="TYPESAFE_API_KEY")
+    jev_model: str = Field(default="jev-latest", alias="JEV_MODEL")
+    jev_base_url: str = Field(default="https://api.typesafe.ai", alias="JEV_BASE_URL")
+    # Per-call ceiling. Jev answers in ~0.2–0.6 s; every site has a fallback,
+    # so waiting longer only adds latency to a turn.
+    jev_timeout_s: float = Field(default=5.0, gt=0, alias="JEV_TIMEOUT_S")
+    # Below this confidence a choice/score verdict is "unsure" and the site
+    # takes its fallback. Re-fit from the labelled set (evals/jev), never
+    # hand-tuned after an incident.
+    jev_confidence_threshold: float = Field(
+        default=0.8, ge=0.5, le=1.0, alias="JEV_CONFIDENCE_THRESHOLD"
+    )
+
+    # --- Per-turn hard budgets (CLAUDE.md §2.3), next to max_iterations ---
+    # Exceeding either ends the turn with the same limit reply the iteration
+    # cap uses; it is traced as `limit_reached` with the reason.
+    max_tool_calls_per_turn: int = Field(
+        default=25, gt=0, alias="MAX_TOOL_CALLS_PER_TURN"
+    )
+    max_tokens_per_turn: int = Field(default=80_000, gt=0, alias="MAX_TOKENS_PER_TURN")
+
+    # --- Agent-authored skills (ADR-0004 B) ---
+    # Off by default. When on, the model gets a `propose_skill` tool whose
+    # proposals are gated by the decision model and only *traced* — never
+    # loaded into the prompt, never written to disk (Cloud Run has none).
+    skill_proposals_enabled: bool = Field(
+        default=False, alias="SKILL_PROPOSALS_ENABLED"
+    )
+
     # --- Embeddings (semantic memory, ADR-0003) ---
     # Anthropic has no first-party embeddings API and recommends Voyage AI; the
     # agent's semantic-memory store embeds facts/queries via Voyage's REST API

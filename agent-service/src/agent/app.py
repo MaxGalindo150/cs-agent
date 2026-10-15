@@ -23,6 +23,7 @@ consumer; it owns nothing it would need to close.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from dataclasses import dataclass
@@ -40,19 +41,27 @@ from anthropic.types import (
 )
 from pydantic import BaseModel, ValidationError
 
-from agent.identity import Principal
+from agent.decide.jev import Decider
+from agent.decide.sites import DecisionConfig, Decisions
+from agent.identity import Principal, audience_of
 from agent.loop.agent import LoopResult, run_loop
 from agent.memory import Memory, MemoryConfig
 from agent.memory.db import Database
 from agent.memory.embeddings import Embedder
 from agent.observability import LoopEvent, Observer
 from agent.ops.tracing import Tracer, TracerConfig, compose
+from agent.prompts import load_prompt
 from agent.runtime.session import Session
 from agent.tools.context import ToolContext
 from agent.tools.registry import ToolRegistry
 from agent.vision import Image
 
 log = structlog.get_logger()
+
+# The LLM judge's prompt — used only for turns the decision model was unsure
+# about (ADR-0004 E): the cheap judge grades everything, the expensive one
+# grades what the cheap one couldn't.
+JUDGE_PROMPT = load_prompt("internal/turn_judge")
 
 # Keyed by the block's own "type" discriminant, not by its response-side
 # Python class — a streamed response can hand back a subclass (e.g.
@@ -208,6 +217,17 @@ class AgentConfig:
     provider answered. A single provider today; kept explicit for parity with
     Waku's multi-provider traces."""
 
+    max_tool_calls: int | None = 25
+    """Hard budget: tool calls per turn (CLAUDE.md §2.3). ``None`` = unbounded."""
+
+    max_turn_tokens: int | None = 80_000
+    """Hard budget: input+output tokens per turn across every LLM call.
+    ``None`` = unbounded."""
+
+    fast_model: str = ""
+    """``ANTHROPIC_FAST_MODEL`` — the LLM judge for turns the decision model
+    was unsure about. Empty disables that escalation."""
+
 
 class SuspendedToolUse(BaseModel):
     """Validated shape of ``chat_sessions.suspended_tool_use``.
@@ -244,12 +264,29 @@ class Agent:
         tools: ToolRegistry,
         tracer: Tracer,
         config: AgentConfig,
+        decisions: Decisions | None = None,
     ) -> None:
         self._client = client
         self._memory = memory
         self._tools = tools
         self._tracer = tracer
         self._config = config
+        self._decisions = decisions or Decisions(None)
+
+    # The worker and the feedback route need the same decision model and the
+    # same trace sink the turn uses, so a decision made off the request path
+    # lands in the same ledgers.
+    @property
+    def decisions(self) -> Decisions:
+        return self._decisions
+
+    @property
+    def memory(self) -> Memory:
+        return self._memory
+
+    @property
+    def tracer(self) -> Tracer:
+        return self._tracer
 
     async def start_session(
         self, title: str | None = None, principal: Principal | None = None
@@ -318,7 +355,7 @@ class Agent:
         instead. See ``agent/runtime/session.py`` for why this must be a
         harness guarantee, not a prompt instruction the model could ignore.
         """
-        captured: dict[str, Any] = {}
+        captured: dict[str, Any] = {"decisions": []}
 
         def _capture(kind: str, ev: LoopEvent) -> None:
             if kind == "gate":
@@ -326,6 +363,17 @@ class Agent:
                     "decision": ev.get("decision"),
                     "reason": ev.get("reason"),
                 }
+            elif kind == "decision":
+                # A compact per-turn summary of the harness's judgment calls
+                # for the message's meta; the full records are in the trace.
+                captured["decisions"].append(
+                    {
+                        "site": ev.get("site"),
+                        "source": ev.get("source"),
+                        "acted": ev.get("acted"),
+                        "latency_ms": ev.get("latency_ms"),
+                    }
+                )
 
         notify = compose(observer, self._tracer.event, _capture)
         t0 = time.perf_counter()
@@ -333,6 +381,7 @@ class Agent:
             principal=principal,
             session_id=session_id,
             host_credential=host_credential,
+            notify=notify,
         )
         persisted_message = _with_image_marker(user_message or "", images)
 
@@ -384,6 +433,7 @@ class Agent:
                     source,
                     stream,
                     ctx,
+                    captured,
                 )
                 if resumed is not None:
                     return resumed
@@ -429,10 +479,15 @@ class Agent:
                 observer=notify,
                 stream=stream,
                 ctx=ctx,
+                decisions=self._decisions,
+                max_tool_calls=self._config.max_tool_calls,
+                max_turn_tokens=self._config.max_turn_tokens,
             )
 
             meta: dict[str, Any] = {
                 "gate": captured.get("gate"),
+                "skills": session.skills_loaded,
+                **self._decision_meta(captured, result),
                 "iterations": result.iterations,
                 "latency_ms": int((time.perf_counter() - t0) * 1000),
                 "tools": [
@@ -483,6 +538,14 @@ class Agent:
                 meta=meta,
             )
 
+            # The judge runs after the reply is persisted (it needs the
+            # message id to score) and inside the turn (so the scores are
+            # stamped with it). ~0.3 s after the user already has their
+            # answer; see _judge for why it never fails the turn.
+            await self._judge(
+                result, user_message, session.skills_loaded, principal, notify
+            )
+
             # Consolidation is intentionally NOT run here: on serverless it moves
             # to an async worker (CLAUDE.md §4), off the request hot path — an
             # extra LLM call per turn would blow the latency/cost budget. Waku's
@@ -507,6 +570,7 @@ class Agent:
         source: str,
         stream: bool,
         ctx: ToolContext,
+        captured: dict[str, Any],
     ) -> LoopResult | None:
         """Resolve a pending `present_choice` (or decide there's nothing here
         that resolves it yet). Two resolution paths:
@@ -642,9 +706,14 @@ class Agent:
             observer=notify,
             stream=stream,
             ctx=ctx,
+            decisions=self._decisions,
+            max_tool_calls=self._config.max_tool_calls,
+            max_turn_tokens=self._config.max_turn_tokens,
         )
 
         meta: dict[str, Any] = {
+            "skills": session.skills_loaded,
+            **self._decision_meta(captured, result),
             "iterations": result.iterations,
             "latency_ms": int((time.perf_counter() - t0) * 1000),
             "tools": [
@@ -705,8 +774,199 @@ class Agent:
         await self._memory.mark_choice_resolved(
             session_id, tool_use_id, matched["id"] if matched is not None else None
         )
+        await self._judge(
+            result, logged_user_text, session.skills_loaded, ctx.principal, notify
+        )
         self._tracer.end_turn(result.reply, result.iterations)
         return result
+
+    # ---- judgment calls around the turn (ADR-0004) ---------------------------
+    @staticmethod
+    def _decision_meta(captured: dict[str, Any], result: LoopResult) -> dict[str, Any]:
+        """What the turn's meta records about the harness's judgment calls:
+        enough to count and filter turns later, never the full state."""
+        decisions = captured.get("decisions", [])
+        return {
+            "decisions": decisions,
+            "nudges": result.nudges,
+            "budget_exhausted": result.budget_exhausted,
+            "usage": result.usage,
+        }
+
+    async def _judge(
+        self,
+        result: LoopResult,
+        user_message: str,
+        skills: list[str],
+        principal: Principal | None,
+        notify: Observer,
+    ) -> None:
+        """Score the finished turn: the decision model grades every reply;
+        the LLM judge grades only the ones it was unsure about. Scores land
+        as ``score`` records keyed by the message id (the same key the user's
+        thumbs use), so quality, grounding and feedback can be joined.
+
+        Never raises: a reply the user already has must not turn into an
+        error because grading it failed — the failure is traced instead.
+        """
+        if result.message_id is None or not self._decisions.enabled:
+            return
+        message_id = str(result.message_id)
+        audience = audience_of(principal)
+        try:
+            verdict = await self._decisions.judge_turn(
+                user_message, result.reply, result.tool_calls, skills, audience, notify
+            )
+        except Exception as exc:  # noqa: BLE001 - grading must never fail a reply
+            log.error("judge.failed", error=str(exc), message_id=message_id)
+            return
+        if verdict is None:
+            return
+        for name, value in (
+            ("jev.quality", verdict.quality),
+            ("jev.grounded", verdict.p_grounded >= 0.5),
+            ("jev.resolved", verdict.p_resolved >= 0.5),
+        ):
+            notify(
+                "score",
+                self._score(name, value, message_id, source="jev"),
+            )
+        if verdict.needs_llm_judge and self._config.fast_model:
+            await self._llm_judge(
+                result, user_message, skills, audience, message_id, notify
+            )
+
+    async def _llm_judge(
+        self,
+        result: LoopResult,
+        user_message: str,
+        skills: list[str],
+        audience: str,
+        message_id: str,
+        notify: Observer,
+    ) -> None:
+        """The escalation path of the judge: one fast-model call with the
+        same rubric, only for turns the decision model couldn't grade with
+        confidence. Failures are traced, never raised (see ``_judge``)."""
+        tools_used = [
+            {"tool": c["tool"], "output": str(c["output"])[:300]}
+            for c in result.tool_calls
+        ]
+        prompt = JUDGE_PROMPT.format(
+            audience=audience,
+            user_message=user_message,
+            tools_used=json.dumps(tools_used, ensure_ascii=False, default=str),
+            skills=", ".join(skills) or "none",
+            reply=result.reply,
+        )
+        try:
+            response = await self._client.messages.create(
+                model=self._config.fast_model,
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = "".join(getattr(block, "text", "") for block in response.content)
+            graded = json.loads(text[text.index("{") : text.rindex("}") + 1])
+            quality = float(graded["quality"])
+        except Exception as exc:  # noqa: BLE001 - grading must never fail a reply
+            notify("judge_error", {"source": "llm", "error": str(exc)})
+            return
+        notify("score", self._score("llm.quality", quality, message_id, source="llm"))
+        for name in ("grounded", "resolved"):
+            if name in graded:
+                notify(
+                    "score",
+                    self._score(
+                        f"llm.{name}", bool(graded[name]), message_id, source="llm"
+                    ),
+                )
+
+    @staticmethod
+    def _score(
+        name: str,
+        value: float | str | bool,
+        message_id: str,
+        *,
+        source: str,
+        comment: str | None = None,
+    ) -> LoopEvent:
+        data_type = (
+            "BOOLEAN"
+            if isinstance(value, bool)
+            else "NUMERIC"
+            if isinstance(value, int | float)
+            else "CATEGORICAL"
+        )
+        return {
+            "name": name,
+            "value": value,
+            "data_type": data_type,
+            "source": source,
+            "message_id": message_id,
+            "comment": comment,
+        }
+
+    async def record_feedback(
+        self,
+        session_id: uuid.UUID,
+        message_id: uuid.UUID,
+        rating: int,
+        comment: str | None,
+    ) -> None:
+        """A user rated a reply. Always: the thumb becomes a ``score`` on the
+        message, so it can be joined with the judge's scores on the same key.
+        On a thumbs-down, with a decision model: a diagnosis of where in the
+        harness the reply most likely went wrong, as a categorical score.
+
+        Runs outside any turn (a later request), so the session id is passed
+        to the tracer explicitly. Never raises — the vote is already saved.
+        """
+        sid, mid = str(session_id), str(message_id)
+        self._tracer.score(
+            "user_feedback",
+            rating,
+            message_id=mid,
+            session_id=sid,
+            source="user",
+            comment=comment,
+        )
+        if rating >= 0 or not self._decisions.enabled:
+            return
+        try:
+            turn = await self._memory.turn_of(session_id, message_id)
+            if turn is None:
+                return
+            user_message, reply, meta = turn
+            diagnosis = await self._decisions.diagnose(
+                user_message,
+                reply,
+                meta.get("tools", []),
+                meta.get("skills", []),
+                comment,
+                lambda kind, ev: self._tracer.event(
+                    kind, {**ev, "session_id": sid, "message_id": mid}
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - the vote is saved; triage is best effort
+            log.error("diagnose.failed", error=str(exc), message_id=mid)
+            return
+        if diagnosis is None:
+            return
+        self._tracer.score(
+            "jev.diagnosis",
+            diagnosis.failure_site or "unsure",
+            message_id=mid,
+            session_id=sid,
+            source="jev",
+            comment=f"confidence={diagnosis.confidence:.2f}",
+        )
+        self._tracer.score(
+            "jev.actionable",
+            diagnosis.p_actionable >= 0.5,
+            message_id=mid,
+            session_id=sid,
+            source="jev",
+        )
 
 
 def build_agent(
@@ -723,6 +983,10 @@ def build_agent(
     max_tokens: int = 2048,
     history_turns: int = 12,
     provider: str = "anthropic",
+    decider: Decider | None = None,
+    decision_threshold: float = 0.8,
+    max_tool_calls: int | None = 25,
+    max_turn_tokens: int | None = 80_000,
 ) -> Agent:
     """Assemble an ``Agent`` from its parts — the single place ``Memory`` +
     ``Tracer`` + ``Agent`` are wired together, shared by the transport lifespan
@@ -733,7 +997,19 @@ def build_agent(
     ``self.tracer = Tracer(...)`` lines in Waku's ``Waku.__init__`` — the one spot
     where the memory pillars (semantic / episodic / procedural) come into being.
     """
-    memory = Memory(db, client, MemoryConfig(fast_model=fast_model), embedder=embedder)
+    # One Decisions facade shared by the memory facade, the loop, the judge
+    # and the worker — so the threshold and the trace shape are the same at
+    # every site. ``decider=None`` disables every site at once (ADR-0004).
+    decisions = Decisions(
+        decider, DecisionConfig(confidence_threshold=decision_threshold)
+    )
+    memory = Memory(
+        db,
+        client,
+        MemoryConfig(fast_model=fast_model),
+        embedder=embedder,
+        decisions=decisions,
+    )
     tracer = Tracer(
         TracerConfig(model=chat_model, trace_dir=trace_dir, otel_endpoint=otel_endpoint)
     )
@@ -748,5 +1024,9 @@ def build_agent(
             max_tokens=max_tokens,
             history_turns=history_turns,
             provider=provider,
+            max_tool_calls=max_tool_calls,
+            max_turn_tokens=max_turn_tokens,
+            fast_model=fast_model,
         ),
+        decisions=decisions,
     )

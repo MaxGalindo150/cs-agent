@@ -17,6 +17,7 @@ optional: with no `memory` wired, a Session is just the SOUL + clock.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -62,6 +63,10 @@ class Session:
         self.session_id = session_id
         self.memory = memory  # agent.memory.Memory (None until it's wired)
         self.history: list[dict[str, Any]] = []
+        # Which SKILL.md policies the last build_system() loaded — recorded on
+        # the turn (meta) and handed to the judge, so a bad reply can be
+        # traced to the procedure that was (or wasn't) in the prompt.
+        self.skills_loaded: list[str] = []
 
     async def fixed_response(self, user_message: str) -> str | None:
         """A canned reply that must bypass the LLM entirely, or ``None`` if
@@ -105,15 +110,19 @@ class Session:
         if self.memory is not None:
             # Hero moment #1: a cheap judge decides IF we retrieve at all —
             # default-on retrieval is slow and biases answers (see
-            # memory/retrieval_gate.py). Async here because the gate calls the LLM.
-            retrieved = await self.memory.gated_retrieve(
-                user_message, user_id, notify=notify
+            # memory/retrieval_gate.py). The skill match is independent of
+            # it, so both decisions run concurrently: one round-trip of
+            # latency for the two, not two.
+            retrieved, skills = await asyncio.gather(
+                self.memory.gated_retrieve(user_message, user_id, notify=notify),
+                self.memory.select_skills(user_message, audience, notify=notify),
             )
             if retrieved:
                 parts.append("\nRelevant memory:\n" + retrieved)
-            skills = self.memory.matching_skills(user_message, audience)
+            self.skills_loaded = [s.name for s in skills]
             if skills:
-                parts.append("\nRelevant skill instructions:\n" + skills)
+                bodies = "\n\n".join(f"### {s.name}\n{s.body}" for s in skills)
+                parts.append("\nRelevant skill instructions:\n" + bodies)
 
         return "\n".join(parts)
 

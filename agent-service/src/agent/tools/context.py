@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from agent.identity import Principal
+from agent.observability import Observer
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,3 +31,7 @@ class ToolContext:
     # repr=False so no log line, traceback or debugger dump ever prints it;
     # tools must never echo it back in their output (which is traced).
     host_credential: str | None = field(default=None, repr=False)
+    # The turn's observer, for the rare tool that itself makes a harness
+    # judgment call and must trace it (propose_skill). Set by Agent.respond()
+    # alongside session_id; None in tests that build a bare ToolContext.
+    notify: Observer | None = field(default=None, repr=False, compare=False)
