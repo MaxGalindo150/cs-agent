@@ -357,3 +357,17 @@ async def test_a_tool_outside_the_audience_is_refused_even_if_called() -> None:
     assert "not available" in await reg.execute("customer_only", {}, _ALIADO)
     assert "not available" in await reg.execute("aliado_only", {}, _CUSTOMER)
     assert await reg.execute("everyone", {}, _ALIADO) == "ok"
+
+
+def test_aliados_are_not_offered_escalation() -> None:
+    # No one picks up aliado escalations yet, and escalating locks the chat.
+    from agent.tools.implementations.escalation import make_escalate_to_human_tool
+
+    reg = ToolRegistry()
+    reg.register(make_escalate_to_human_tool(None))  # type: ignore[arg-type]
+    aliado = ToolContext(principal=Principal(user_id="uid-1", merchant_id="42"))
+    customer = ToolContext(principal=Principal(user_id="usr_1"))
+
+    assert reg.schemas(aliado) == []
+    assert [s["name"] for s in reg.schemas(customer)] == ["escalate_to_human"]
+    assert [s["name"] for s in reg.schemas(None)] == ["escalate_to_human"]

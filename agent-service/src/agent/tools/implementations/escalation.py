@@ -66,4 +66,8 @@ def make_escalate_to_human_tool(db: Database) -> Tool:
         },
         fn=escalate_to_human,
         needs_context=True,
+        # Not for aliados yet: no one picks up their escalations, and an
+        # escalated session stops answering. Until that has a destination,
+        # the merchant soul points them to the portal's Centro de ayuda.
+        audiences=frozenset({"consumer"}),
     )
