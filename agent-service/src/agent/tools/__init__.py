@@ -18,6 +18,9 @@ from agent.tools.implementations.bnpl.orders import (
 from agent.tools.implementations.bnpl.transactions import make_get_transactions_tool
 from agent.tools.implementations.escalation import make_escalate_to_human_tool
 from agent.tools.implementations.memory import make_manage_memory_tool
+from agent.tools.implementations.merchant.daily_closing import (
+    make_get_daily_closing_tool,
+)
 from agent.tools.implementations.merchant.orders import (
     make_get_order_detail_tool,
     make_search_orders_tool,
@@ -47,4 +50,5 @@ def build_registry(
         registry.register(make_search_orders_tool(merchant_client))
         registry.register(make_get_order_detail_tool(merchant_client))
         registry.register(make_get_monthly_report_tool(merchant_client))
+        registry.register(make_get_daily_closing_tool(merchant_client))
     return registry

@@ -20,6 +20,7 @@ NO_CREDENTIAL = (
     "Ask them to reload the portal and try again."
 )
 UNAVAILABLE = "The store data service is unavailable right now — try again shortly."
+TOO_SLOW = "The store data service took too long to answer — try again shortly."
 NO_ACCESS = (
     "This aliado's user doesn't have access to that information. An admin of "
     "their store can check it."
@@ -36,8 +37,10 @@ async def merchant_get(
     ctx: ToolContext,
     path: str,
     params: list[tuple[str, str]] | None = None,
+    timeout: float | None = None,
 ) -> Found | str | None:
-    """``Found`` on 200, ``None`` on 404, otherwise text for the model."""
+    """``Found`` on 200, ``None`` on 404, otherwise text for the model.
+    ``timeout`` overrides the client's for an endpoint known to be slow."""
     if not ctx.host_credential:
         return NO_CREDENTIAL
     try:
@@ -45,7 +48,10 @@ async def merchant_get(
             path,
             params=tuple(params or ()),
             headers={"Authorization": f"Bearer {ctx.host_credential}"},
+            timeout=httpx.USE_CLIENT_DEFAULT if timeout is None else timeout,
         )
+    except httpx.TimeoutException:
+        return TOO_SLOW
     except httpx.RequestError:
         return UNAVAILABLE
     if resp.status_code == 404:

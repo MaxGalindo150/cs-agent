@@ -13,12 +13,11 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from typing import Any
 
 import httpx
 
-from agent.clock import VENEZUELA
+from agent import clock
 from agent.tools.context import ToolContext
 from agent.tools.implementations.merchant._http import Found, merchant_get
 from agent.tools.registry import Tool
@@ -198,7 +197,7 @@ def _summary(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "order_uuid": row.get("orderUuid"),
         "order_number": row.get("orderNumber"),
-        "created_at": _local_time(row.get("createdAt")),
+        "created_at": clock.describe(row.get("createdAt")),
         "amount": row.get("amount"),
         "status": _label(_STATUS_LABELS, row.get("statusName")),
         "store": row.get("storeName"),
@@ -220,12 +219,12 @@ def _detail(order: dict[str, Any]) -> dict[str, Any]:
     shipment = order.get("shipment") or {}
     return {
         "order_number": order.get("identifierNumber"),
-        "created_at": _local_time(order.get("createdAt")),
+        "created_at": clock.describe(order.get("createdAt")),
         "status": _label(_STATUS_LABELS, status_code),
         "amount": order.get("amount"),
         "down_payment_amount": order.get("downPaymentAmount"),
         "financed_amount": order.get("financedAmount"),
-        "down_payment_paid_at": _local_time(order.get("downPaymentPaidAt")),
+        "down_payment_paid_at": clock.describe(order.get("downPaymentPaidAt")),
         "paid_to_merchant": order.get("paidToMerchant"),
         "channel": _label(_CHANNEL_LABELS, order.get("channel")),
         "delivery_status": _delivery(status_code, order.get("deliveryStatus")),
@@ -276,18 +275,3 @@ def _delivery(status_code: Any, delivery: Any) -> Any:
     if status_code == "CANCELLED":
         return "Orden cancelada"
     return _label(_DELIVERY_LABELS, delivery)
-
-
-def _local_time(value: Any) -> Any:
-    """An API timestamp (UTC) as Venezuelan local time, which is what the
-    aliado sees in the portal."""
-    if not isinstance(value, str):
-        return value
-    try:
-        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return value
-    if moment.tzinfo is None:
-        return value
-    local = moment.astimezone(VENEZUELA)
-    return f"{local:%Y-%m-%d %H:%M} (hora de Venezuela)"
