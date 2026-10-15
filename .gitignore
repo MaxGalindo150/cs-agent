@@ -9,6 +9,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+# Vendored build of @cashea/cheo, committed on purpose (frontend/vendor/README.md).
+!frontend/vendor/cheo-orb/dist/
 
 # Tool caches
 .pytest_cache/
