@@ -33,7 +33,11 @@ class FakeDecider:
     def fail(self, status: int | None = 503) -> FakeDecider:
         """Queue a failure for the next call."""
         self._scripts.append(
-            JevError("scripted failure", status=status, request_id="req_fake")
+            JevError(
+                f"scripted failure (HTTP {status})",
+                status=status,
+                request_id="req_fake",
+            )
         )
         return self
 

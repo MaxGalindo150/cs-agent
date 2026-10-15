@@ -18,6 +18,19 @@ The same loop events fan out to up to three sinks:
    (``localhost:4317``) or Langfuse cloud (it speaks OTel; point the endpoint +
    auth headers there). The instrumentation below doesn't know or care which.
 
+Two record types are first-class, so the harness's judgment calls can be
+read apart from the loop's activity (ADR-0004):
+
+- ``decision`` — one per harness judgment call (``agent/decide/sites.py``):
+  the site, the typed answers exactly as the decision model returned them
+  (probabilities, labels, confidences), the verdict the harness derived, and
+  whether it acted on it. Also appended to ``decisions.jsonl``.
+- ``score`` — a number or label attached to a turn or a message: the
+  decision model's quality judgement, a user's thumbs up/down, a diagnosis.
+  Also appended to ``scores.jsonl``. The shape (``name``, ``value``,
+  ``data_type``, ``comment``, ``message_id``) is Langfuse's score object, so
+  wiring Langfuse later is a sink, not a redesign.
+
 Provider-neutral by construction (CLAUDE.md §4): the brain never reads
 ``service.Settings``. The transport builds a :class:`TracerConfig` from its own
 settings and injects it — the same pattern as ``MemoryConfig`` / ``DatabaseConfig``.
@@ -43,6 +56,27 @@ _log = structlog.get_logger("agent.trace")
 # A dedicated logger for spend, so token usage can be filtered/aggregated apart
 # from the general trace stream (e.g. a Cloud Logging log-based metric on cost).
 _usage_log = structlog.get_logger("agent.usage")
+# Judgment calls and scores get their own loggers too, for the same reason:
+# a log-based metric on "how often does the decision model disagree with the
+# chat model" should not have to sift the whole trace stream.
+_decision_log = structlog.get_logger("agent.decision")
+_score_log = structlog.get_logger("agent.score")
+
+# OpenInference span kinds for the decision sites, so a backend that renders
+# them (Phoenix today, Langfuse later) shows a guardrail as a guardrail and a
+# judge as an evaluator instead of a generic chain step.
+_DECISION_SPAN_KINDS: dict[str, str] = {
+    "retrieval": "GUARDRAIL",
+    "skill_match": "GUARDRAIL",
+    "tool_review": "GUARDRAIL",
+    "ask_or_act": "GUARDRAIL",
+    "consolidation_gate": "GUARDRAIL",
+    "memory_select": "RERANKER",
+    "fact_select": "RERANKER",
+    "judge": "EVALUATOR",
+    "diagnose": "EVALUATOR",
+    "skill_proposal": "EVALUATOR",
+}
 
 
 @dataclass(slots=True)
@@ -193,6 +227,30 @@ class Tracer:
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
+    def _append_ledger(self, filename: str, record: dict[str, Any]) -> None:
+        """Append one record to a dedicated JSONL ledger next to the trace
+        file (``usage.jsonl``, ``decisions.jsonl``, ``scores.jsonl``). Off
+        when no trace dir is set — stdout already carries the record."""
+        if self._trace_dir is None:
+            return
+        record = {**record, "ts": _now()}
+        with (self._trace_dir / filename).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def _record_decision(self, event: LoopEvent) -> None:
+        """One harness judgment call. Stamped with the turn like every trace
+        record, then appended to the ``decisions.jsonl`` ledger so the
+        decision model's behaviour can be aggregated per site without
+        parsing the whole trace."""
+        turn = _turn.get()
+        record: dict[str, Any] = {
+            "session_id": turn.session_id if turn else None,
+            "turn_id": turn.turn_id if turn else None,
+            **event,
+        }
+        _decision_log.info("decision", **record)
+        self._append_ledger("decisions.jsonl", record)
+
     def _record_usage(self, event: LoopEvent) -> None:
         """One LLM call's token usage — the running record of what was spent.
 
@@ -245,11 +303,24 @@ class Tracer:
                 "model": self._config.model,
                 **event,
             }
+        if kind == "decision":
+            self._record_decision(event)
+        if kind == "score":
+            # Scores emitted mid-turn (the judge) ride the observer like any
+            # event; ``score()`` below is the same path for out-of-turn ones.
+            self._record_score(event)
         self._write({"type": kind, **event})
         turn = _turn.get()
         if self._otel_tracer and turn is not None:
-            label = f"{kind}.{event.get('tool', event.get('decision', ''))}".rstrip(".")
-            span_kind = {"llm": "LLM", "tool": "TOOL"}.get(kind, "CHAIN")
+            label = (
+                f"{kind}.{event.get('tool', event.get('site', event.get('name', '')))}"
+            )
+            label = label.rstrip(".")
+            span_kind = {"llm": "LLM", "tool": "TOOL", "score": "EVALUATOR"}.get(
+                kind, "CHAIN"
+            )
+            if kind == "decision":
+                span_kind = _DECISION_SPAN_KINDS.get(str(event.get("site")), "CHAIN")
             with self._otel_tracer.start_as_current_span(
                 label,
                 attributes={
@@ -263,6 +334,72 @@ class Tracer:
                     "agent.turn_id": turn.turn_id,
                     **{
                         f"agent.{k}": json.dumps(v, default=str)
+                        for k, v in event.items()
+                    },
+                },
+            ):
+                pass
+
+    def _record_score(self, event: LoopEvent) -> None:
+        turn = _turn.get()
+        record: dict[str, Any] = {
+            "session_id": event.get("session_id")
+            or (turn.session_id if turn else None),
+            "turn_id": turn.turn_id if turn else None,
+            **{k: v for k, v in event.items() if k != "session_id"},
+        }
+        _score_log.info("score", **record)
+        self._append_ledger("scores.jsonl", record)
+
+    def score(
+        self,
+        name: str,
+        value: float | str | bool,
+        *,
+        message_id: str | None,
+        session_id: str | None = None,
+        source: str,
+        comment: str | None = None,
+        data_type: str | None = None,
+    ) -> None:
+        """Attach a score to a message — the one trace record that can be
+        written *outside* a turn (a thumbs-down arrives minutes later, from a
+        different request). ``session_id`` is therefore explicit here; inside
+        a turn it is inferred like everything else.
+
+        Mirrors Langfuse's score fields one to one (``name``, ``value``,
+        ``data_type`` NUMERIC / CATEGORICAL / BOOLEAN, ``comment``), keyed by
+        the assistant ``message_id`` the feedback endpoint already uses.
+        """
+        if data_type is None:
+            data_type = (
+                "BOOLEAN"
+                if isinstance(value, bool)
+                else "NUMERIC"
+                if isinstance(value, int | float)
+                else "CATEGORICAL"
+            )
+        event: LoopEvent = {
+            "name": name,
+            "value": value,
+            "data_type": data_type,
+            "source": source,
+            "message_id": message_id,
+            "comment": comment,
+        }
+        if session_id is not None:
+            event["session_id"] = session_id
+        self._record_score(event)
+        # Keep the explicit session_id in the trace record too: outside a
+        # turn, _write has no turn binding to stamp it from.
+        self._write({"type": "score", **event})
+        if self._otel_tracer is not None and _turn.get() is not None:
+            with self._otel_tracer.start_as_current_span(
+                f"score.{name}",
+                attributes={
+                    "openinference.span.kind": "EVALUATOR",
+                    **{
+                        f"agent.score.{k}": json.dumps(v, default=str)
                         for k, v in event.items()
                     },
                 },
