@@ -707,3 +707,171 @@ async def test_streaming_failure_falls_back_to_create() -> None:
     assert client.messages.create_calls == 1
     # The hiccup must be observable, not swallowed silently.
     assert any(kind == "stream_error" for kind, _ in events)
+
+
+# ---- displays, silent tools, ends_turn -------------------------------------
+
+
+async def test_a_tool_display_is_emitted_and_kept_after_its_tool_group() -> None:
+    async def find(**_: Any) -> str:
+        return "3 orders"
+
+    reg = ToolRegistry()
+    reg.register(
+        Tool(
+            name="find",
+            description="d",
+            input_schema=_SCHEMA,
+            fn=find,
+            done_label="Busqué",
+            display=lambda out: {"type": "orders", "count": out.split()[0]},
+        )
+    )
+    client = FakeClient(
+        [
+            _msg(_tool_use("find", {}, "toolu_1"), stop_reason="tool_use"),
+            _msg(_text("Tienes 3.")),
+        ]
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    result = await _run(
+        client,
+        "m",
+        "s",
+        [{"role": "user", "content": "hi"}],
+        reg,
+        observer=lambda kind, ev: events.append((kind, ev)),
+    )
+
+    assert result.segments == [
+        {
+            "type": "tools",
+            "calls": [
+                {
+                    "tool": "find",
+                    "args": {},
+                    "output": "3 orders",
+                    "label": "find",
+                    "done_label": "Busqué",
+                }
+            ],
+        },
+        {"type": "orders", "count": "3"},
+        {"type": "text", "text": "Tienes 3."},
+    ]
+    assert ("display", {"type": "orders", "count": "3"}) in events
+    tool_event = next(ev for kind, ev in events if kind == "tool")
+    assert tool_event["done_label"] == "Busqué"
+
+
+async def test_a_broken_display_shows_nothing_but_the_turn_goes_on() -> None:
+    async def find(**_: Any) -> str:
+        return "not json"
+
+    def explode(_: str) -> dict[str, Any] | None:
+        raise ValueError("boom")
+
+    reg = ToolRegistry()
+    reg.register(
+        Tool(
+            name="find", description="d", input_schema=_SCHEMA, fn=find, display=explode
+        )
+    )
+    client = FakeClient(
+        [
+            _msg(_tool_use("find", {}, "toolu_1"), stop_reason="tool_use"),
+            _msg(_text("ok")),
+        ]
+    )
+
+    result = await _run(client, "m", "s", [{"role": "user", "content": "hi"}], reg)
+
+    assert result.reply == "ok"
+    assert [seg["type"] for seg in result.segments] == ["tools", "text"]
+
+
+async def test_an_ends_turn_silent_tool_closes_the_turn_without_another_llm_call() -> (
+    None
+):
+    """FakeClient has one scripted response: a second create() would raise."""
+
+    async def suggest(**_: Any) -> str:
+        return "shown"
+
+    reg = ToolRegistry()
+    reg.register(
+        Tool(
+            name="suggest",
+            description="d",
+            input_schema=_SCHEMA,
+            fn=suggest,
+            display=lambda _: {"type": "suggestions", "options": ["Ver detalle"]},
+            silent=True,
+            ends_turn=True,
+        )
+    )
+    client = FakeClient(
+        [
+            _msg(
+                _text("Aquí tienes."),
+                _tool_use("suggest", {"options": ["Ver detalle"]}, "toolu_1"),
+                stop_reason="tool_use",
+            )
+        ]
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    result = await _run(
+        client,
+        "m",
+        "s",
+        [{"role": "user", "content": "hi"}],
+        reg,
+        observer=lambda kind, ev: events.append((kind, ev)),
+    )
+
+    assert result.reply == "Aquí tienes."
+    # Silent: no tool group in the transcript, and its events say so.
+    assert result.segments == [
+        {"type": "text", "text": "Aquí tienes."},
+        {"type": "suggestions", "options": ["Ver detalle"]},
+    ]
+    assert all(
+        ev.get("silent") for kind, ev in events if kind in ("tool_start", "tool")
+    )
+
+
+async def test_ends_turn_only_applies_when_the_whole_batch_has_it() -> None:
+    async def suggest(**_: Any) -> str:
+        return "shown"
+
+    async def find(**_: Any) -> str:
+        return "found"
+
+    reg = ToolRegistry()
+    reg.register(
+        Tool(
+            name="suggest",
+            description="d",
+            input_schema=_SCHEMA,
+            fn=suggest,
+            ends_turn=True,
+        )
+    )
+    _register(reg, "find", find)
+    client = FakeClient(
+        [
+            _msg(
+                _tool_use("find", {}, "toolu_1"),
+                _tool_use("suggest", {}, "toolu_2"),
+                stop_reason="tool_use",
+            ),
+            _msg(_text("listo")),
+        ]
+    )
+
+    result = await _run(client, "m", "s", [{"role": "user", "content": "hi"}], reg)
+
+    assert result.reply == "listo"
+    assert len(client.messages.calls) == 2

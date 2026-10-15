@@ -26,6 +26,7 @@ from agent.tools.implementations.merchant.orders import (
     make_search_orders_tool,
 )
 from agent.tools.implementations.merchant.reports import make_get_monthly_report_tool
+from agent.tools.implementations.merchant.suggestions import make_suggest_replies_tool
 from agent.tools.implementations.present_choice import make_present_choice_tool
 from agent.tools.registry import ToolRegistry
 
@@ -46,6 +47,7 @@ def build_registry(
     registry.register(make_manage_memory_tool(db))
     registry.register(make_escalate_to_human_tool(db))
     registry.register(make_present_choice_tool())
+    registry.register(make_suggest_replies_tool())
     if merchant_client is not None:
         registry.register(make_search_orders_tool(merchant_client))
         registry.register(make_get_order_detail_tool(merchant_client))

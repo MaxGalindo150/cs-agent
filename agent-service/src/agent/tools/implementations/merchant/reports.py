@@ -57,6 +57,7 @@ def make_get_monthly_report_tool(client: httpx.AsyncClient) -> Tool:
     return Tool(
         name="get_monthly_report",
         progress_label="Consultando el reporte de {month}",
+        done_label="Revisé el reporte de {month}",
         description=(
             "The aliado's settlement report for one calendar month: total "
             "sales, Cashea's service fee and taxes, installments recognised, "

@@ -271,6 +271,8 @@ async def run_loop(
                     # The tool words its own progress line (registry.Tool.label),
                     # so a client renders it without knowing the tool exists.
                     "label": tools.label(call.name, args),
+                    # Only present when true, so ordinary events keep their shape.
+                    **({"silent": True} if tools.silent(call.name) else {}),
                 },
             )
         outputs = await asyncio.gather(
@@ -278,16 +280,49 @@ async def run_loop(
         )
         tool_results: list[ToolResultBlockParam] = []
         calls: list[LoopEvent] = []
+        displays: list[LoopEvent] = []
         for call, output in zip(tool_uses, outputs, strict=True):
             args = cast("dict[str, Any]", call.input)
             event = {"tool": call.name, "args": args, "output": output}
             result.tool_calls.append(event)
-            notify("tool", event)
-            calls.append({**event, "label": tools.label(call.name, args)})
+            done_label = tools.done_label(call.name, args)
+            silent = tools.silent(call.name)
+            notify(
+                "tool",
+                {
+                    **event,
+                    "done_label": done_label,
+                    **({"silent": True} if silent else {}),
+                },
+            )
+            if not silent:
+                segment_call = {**event, "label": tools.label(call.name, args)}
+                if done_label:
+                    segment_call["done_label"] = done_label
+                calls.append(segment_call)
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": call.id, "content": output}
             )
-        result.segments.append({"type": "tools", "calls": calls})
+            display = tools.display(call.name, output)
+            if display is not None:
+                displays.append(display)
+        if calls:
+            result.segments.append({"type": "tools", "calls": calls})
+        # What the tools drew for the user goes after their activity group,
+        # in call order, and is kept with the message (survives a reload).
+        for display in displays:
+            notify("display", display)
+            result.segments.append(display)
+
+        # Tools that only add to a reply already written (follow-up
+        # suggestions) end the turn here: another LLM call would only cost
+        # latency. Only when the whole batch is such tools — anything else
+        # still needs the model to read its result.
+        if all(tools.ends_turn(call.name) for call in tool_uses):
+            result.reply = "\n\n".join(
+                seg["text"] for seg in result.segments if seg["type"] == "text"
+            )
+            return result
         messages.append({"role": "user", "content": tool_results})
 
     notify("limit_reached", {"max_iterations": max_iterations})

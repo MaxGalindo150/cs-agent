@@ -86,6 +86,31 @@ class Tool:
     ``run_loop`` refuses a batch that mixes a suspending call with others
     regardless of what the model was told."""
 
+    done_label: str | None = None
+    """What a UI shows once this has run, in the past tense: "Consulté tus
+    órdenes". Same ``{arg}`` placeholders as ``progress_label``. Optional — a
+    client without one keeps showing the progress label."""
+
+    display: Callable[[str], dict[str, Any] | None] | None = None
+    """Turns this tool's output into something the chat draws for the user —
+    a dict with a ``type`` (e.g. ``{"type": "orders", "orders": [...]}``) —
+    or None when there's nothing to show. The loop emits it as a ``display``
+    event and keeps it in the message's segments, so it survives a reload.
+    Derived from the output, never from model-written text, so what's drawn
+    is exactly what the tool returned."""
+
+    silent: bool = False
+    """Hidden from the user's activity timeline: no ``tool_start``/``tool``
+    for clients and no entry in the message's tool group (still traced). For
+    tools whose only visible effect is their ``display``."""
+
+    ends_turn: bool = False
+    """If true and every call in a batch has it, the turn ends right after
+    they run — no further LLM call. For tools that only add something to the
+    reply the model already wrote (follow-up suggestions), where another
+    round trip would just cost latency. Unlike ``suspends``, nothing waits
+    for the user's answer."""
+
     def to_api(self) -> dict[str, Any]:
         """The shape the Messages API expects in its `tools=` parameter."""
         return {
@@ -106,6 +131,15 @@ class Tool:
             if cleaned:
                 return cleaned
         return _derive_label(self.name)
+
+    def done(self, args: dict[str, Any]) -> str | None:
+        """``done_label`` filled from the call's arguments, or None."""
+        if not self.done_label:
+            return None
+        filled = _PLACEHOLDER.sub(
+            lambda m: str(args.get(m.group(1), "")), self.done_label
+        )
+        return " ".join(filled.split()) or None
 
 
 def _derive_label(name: str) -> str:
@@ -146,6 +180,29 @@ class ToolRegistry:
         chance to reject it."""
         tool = self._tools.get(name)
         return tool.label(args) if tool else _derive_label(name)
+
+    def done_label(self, name: str, args: dict[str, Any]) -> str | None:
+        tool = self._tools.get(name)
+        return tool.done(args) if tool else None
+
+    def display(self, name: str, output: str) -> dict[str, Any] | None:
+        """What to draw for this call's output, if anything. A display that
+        fails shows nothing rather than breaking the turn."""
+        tool = self._tools.get(name)
+        if tool is None or tool.display is None:
+            return None
+        try:
+            return tool.display(output)
+        except Exception:  # noqa: BLE001 - a broken display must not break the reply
+            return None
+
+    def silent(self, name: str) -> bool:
+        tool = self._tools.get(name)
+        return tool.silent if tool else False
+
+    def ends_turn(self, name: str) -> bool:
+        tool = self._tools.get(name)
+        return tool.ends_turn if tool else False
 
     def suspends(self, name: str) -> bool:
         """Whether calling this tool should suspend the turn (``Tool.suspends``).

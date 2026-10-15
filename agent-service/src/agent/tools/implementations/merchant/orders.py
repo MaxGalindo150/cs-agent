@@ -117,6 +117,7 @@ def make_search_orders_tool(client: httpx.AsyncClient) -> Tool:
     return Tool(
         name="search_orders",
         progress_label="Buscando órdenes",
+        done_label="Consulté tus órdenes",
         description=(
             "Find orders of the aliado's store, newest first. Filter by order "
             "number, the buyer's ID number (cédula), status, and/or a creation "
@@ -148,6 +149,7 @@ def make_search_orders_tool(client: httpx.AsyncClient) -> Tool:
             },
         },
         fn=search_orders,
+        display=order_cards,
         requires_identity=True,
         audiences=frozenset({"merchant"}),
     )
@@ -170,6 +172,7 @@ def make_get_order_detail_tool(client: httpx.AsyncClient) -> Tool:
     return Tool(
         name="get_order_detail",
         progress_label="Consultando la orden",
+        done_label="Revisé la orden",
         description=(
             "Read one order of the aliado's store in full, by the order_uuid "
             "from search_orders: status, amounts in dollars (total, down "
@@ -188,6 +191,7 @@ def make_get_order_detail_tool(client: httpx.AsyncClient) -> Tool:
             "required": ["order_uuid"],
         },
         fn=get_order_detail,
+        display=order_cards,
         requires_identity=True,
         audiences=frozenset({"merchant"}),
     )
@@ -218,6 +222,7 @@ def _detail(order: dict[str, Any]) -> dict[str, Any]:
     cancellation = order.get("cancellationData") or {}
     shipment = order.get("shipment") or {}
     return {
+        "order_uuid": order.get("uuid"),
         "order_number": order.get("identifierNumber"),
         "created_at": clock.describe(order.get("createdAt")),
         "status": _label(_STATUS_LABELS, status_code),
@@ -275,3 +280,33 @@ def _delivery(status_code: Any, delivery: Any) -> Any:
     if status_code == "CANCELLED":
         return "Orden cancelada"
     return _label(_DELIVERY_LABELS, delivery)
+
+
+def order_cards(output: str) -> dict[str, Any] | None:
+    """The chat's order cards for a search_orders / get_order_detail result:
+    the same fields the tool returned, nothing the model wrote. None for an
+    error or empty result (plain text, not JSON)."""
+    try:
+        data = json.loads(output)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    rows = data.get("orders") if "orders" in data else [data]
+    if not isinstance(rows, list):
+        return None
+    cards = [
+        {
+            "order_uuid": row.get("order_uuid"),
+            "order_number": row.get("order_number"),
+            "created_at": row.get("created_at"),
+            "amount": row.get("amount"),
+            # "Abierta: esperando…" → "Abierta"; the card colours by it.
+            "status": str(row.get("status") or "").split(":")[0] or None,
+            "store": row.get("store"),
+            "channel": row.get("channel"),
+        }
+        for row in rows
+        if isinstance(row, dict) and row.get("order_number") is not None
+    ]
+    return {"type": "orders", "orders": cards} if cards else None

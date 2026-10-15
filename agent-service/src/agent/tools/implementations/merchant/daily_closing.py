@@ -68,6 +68,7 @@ def make_get_daily_closing_tool(client: httpx.AsyncClient) -> Tool:
     return Tool(
         name="get_daily_closing",
         progress_label="Revisando el cierre de caja",
+        done_label="Revisé el cierre de caja",
         description=(
             "The aliado's own store's cierre de caja: today's orders so far, "
             "total facturado and total financiado por Cashea (dollars), per "

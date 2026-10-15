@@ -14,7 +14,10 @@ still doing it, rather than a blank pause:
 - ``tool_start`` — a tool is about to run (``{"tool", "label"}``). ``label`` is
   written by the tool itself (``agent.tools.registry.Tool.progress_label``), so
   the client renders progress without knowing which tools exist.
-- ``tool``       — that tool finished (``{"tool", "args", "output"}``).
+- ``tool``       — that tool finished (``{"tool", "args", "output",
+  "done_label"}``); ``done_label`` is the past-tense line, or null.
+- ``display``    — something a tool drew for the user, a dict with a ``type``
+  (``orders``: order cards; ``suggestions``: follow-up replies to tap).
 - ``choice``     — the turn paused on ``present_choice``
   (``{"prompt", "options"}``); the client should resend with ``choice_id`` (or
   free text) to resume, rather than treating the turn as finished.
@@ -93,6 +96,10 @@ async def chat_stream(
             # Only the decision, never `reason` — that is the fast model's
             # free text about the user's message, which is not for display.
             queue.put_nowait(("gate", {"decision": event["decision"]}))
+        elif kind in ("tool_start", "tool") and event.get("silent"):
+            # A tool the user shouldn't see as a step (its display is what
+            # shows) — see agent.tools.registry.Tool.silent.
+            return
         elif kind == "tool_start":
             # `label` is what the UI renders; `tool` is only how the client
             # pairs this with the completion event below.
@@ -109,9 +116,16 @@ async def chat_stream(
                         "tool": event["tool"],
                         "args": event["args"],
                         "output": event["output"][:500],
+                        # Past-tense line for the finished step, when the
+                        # tool declares one ("Consulté tus órdenes").
+                        "done_label": event.get("done_label"),
                     },
                 )
             )
+        elif kind == "display":
+            # Something a tool drew for the user (order cards, follow-up
+            # suggestions) — the full payload, unlike `tool`'s preview.
+            queue.put_nowait(("display", event))
         elif kind == "choice":
             queue.put_nowait(
                 ("choice", {"prompt": event["prompt"], "options": event["options"]})
