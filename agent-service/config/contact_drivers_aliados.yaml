@@ -1,0 +1,350 @@
+# Contact drivers (CD) del canal Aliados — fuente: docs/propuesto-de-cd-aliados.md
+#
+# Lo consume la decisión `contact_driver` (Jev `choice` sobre `drivers[*].criteria`).
+# Confianza >= threshold → el harness aplica `intercom_tag_id`, carga `skill` y
+# recorta el catálogo a `tools`. Por debajo → sin CD (residual), sigue el loop.
+# `always_escalate: true` es regla del harness, no decisión del modelo.
+
+version: 2026-10-02
+profile: merchant
+
+decision:
+  site: contact_driver
+  threshold: 0.8
+  # Si en el probe etiquetado la confianza cae < threshold en > 20 % de los
+  # aciertos, preguntar primero `family` y luego el driver dentro de ella.
+  two_level_fallback: false
+  # Antes de preguntar: quitar etiquetas de botón del menú y la línea
+  # "razón social / RIF / consulta"; sin texto restante no se pregunta.
+  strip_menu_labels: true
+  residual:
+    label: sin_clasificar
+    intercom_tag_id: null          # reemplaza a Otros (12271494) y Sin Tag (16253977)
+    l1_attribute: "Sin contexto"
+    action: ask_for_query
+
+families:
+  acceso:     "Entrar, recibir credenciales, cambiar un dato"
+  tienda:     "Cobrar, anular, cerrar caja, QR, fraude"
+  dinero:     "Liquidación, tarifas, modelo, reportes, retenciones, devoluciones"
+  afiliacion: "Alta, etapa, kit, contrato"
+  online:     "Activar la tienda, catálogo, envíos y órdenes del marketplace"
+  otros:      "Campañas, cliente final, solicitudes de canal"
+
+drivers:
+  - id: acceso_clave
+    cd: "CD - Acceso y clave"
+    family: acceso
+    intercom_tag_id: 16103148
+    retire_tag_ids: [12933927, 16103107, 16103564]
+    criteria: "No puede iniciar sesión en Merchant Web: olvidó o le rechazan la clave, el portal no carga, el código 2FA no llega, perdió el teléfono o el correo de acceso."
+    subtypes: [clave_olvidada_o_rechazada, portal_no_carga, otp_no_llega, clave_mal_escrita, perdio_telefono_o_correo]
+    skill: acceso-credenciales
+    tools: [get_employee_2fa, register_2fa_phone]
+    identity: validacion_seguridad
+    capture: [correo_de_acceso, rol, captura_error, telefono_2fa]
+    handoff: { inbox: "L2 - Bug Aliados", when: "persiste tras la clave nueva" }
+    always_escalate: false
+
+  - id: credenciales_no_recibidas
+    cd: "CD - Credenciales no recibidas"
+    family: acceso
+    intercom_tag_id: 16103149
+    criteria: "Terminó la afiliación o recibió el kit y nunca le llegaron usuario y clave; el correo está lleno o en spam; o pide credenciales para un cajero o gerente nuevo."
+    subtypes: [no_llegaron_tras_kit, correo_lleno_o_spam, verificacion_de_correo, alta_de_empleado]
+    skill: acceso-credenciales
+    tools: []
+    identity: validacion_seguridad
+    capture: [razon_social, rif, correo_registrado, telefono_registrado, rol_solicitante, retiro_kit]
+    handoff: { inbox: "L2 - Credenciales", slack: "#abm-solicitudes-inbound", flow: "Empleados - Reenviar info de usuarios", snooze_days: 15 }
+    always_escalate: false
+
+  - id: actualizar_datos
+    cd: "CD - Actualizar datos"
+    family: acceso
+    intercom_tag_id: 16103150
+    criteria: "Quiere cambiar un dato registrado: teléfono del código de reportes, correo de acceso, cuenta bancaria, logo, datos de contacto."
+    subtypes: [telefono_2fa, correo_admin, cuenta_bancaria, logo_o_nombre, contacto_odoo]
+    skill: datos-del-aliado
+    tools: [get_employee_2fa, register_2fa_phone]
+    identity: validacion_seguridad
+    capture: [dato, valor_actual, valor_nuevo, motivo, rol_solicitante]
+    handoff: { inbox: "L2 - Métodos de pago", folio: "Cambio de datos de pago", snooze_days: 3, alt_inbox: "L2 - Solicitudes ABM" }
+    always_escalate: false
+
+  - id: crear_orden
+    cd: "CD - Crear orden"
+    family: tienda
+    intercom_tag_id: 16261700
+    retire_tag_ids: [16103570]
+    criteria: "Intenta cobrar y la orden no se crea o queda pendiente: inicial sin confirmar, QR de caja que no coincide, orden anterior abierta, error en pantalla, orden por Cashea Link."
+    subtypes: [inicial_pendiente, qr_caja_no_coincide, orden_abierta, rol_o_modulo, cashea_link, cuotas_0_inicial]
+    skill: ordenes
+    tools: [get_order_detail, list_merchant_orders, list_merchant_stores]
+    identity: portal
+    capture: [numero_orden, numero_caja, captura_error, tienda, rol]
+    handoff: { inbox: "L2 - Bug Aliados", alt_inbox: "L2 - Solicitudes ABM", alt_folio: "Sincronización de órdenes" }
+    always_escalate: false
+
+  - id: cancelar_orden
+    cd: "CD - Cancelar orden"
+    family: tienda
+    intercom_tag_id: 16261703
+    criteria: "Quiere anular una orden, no tiene el código de seguridad de 4 dígitos, o pregunta qué pasa con el dinero tras una devolución u orden duplicada."
+    subtypes: [como_cancelar, sin_codigo_seguridad, politica_devolucion, orden_duplicada]
+    skill: ordenes
+    tools: [get_order_detail, get_cancellation_reasons, cancel_order]
+    identity: validacion_seguridad   # solo para reemitir el código
+    capture: [numero_orden, tienda, rol_solicitante, fecha_orden]
+    handoff: { inbox: "L2 - Credenciales", when: "código de seguridad", alt_inbox: "Auditoría", alt_when: "reactivar o modificar" }
+    always_escalate: false
+
+  - id: cierre_caja
+    cd: "CD - Cierre de caja"
+    family: tienda
+    intercom_tag_id: 16261712
+    criteria: "No cerró la caja de ayer, hizo varios cierres el mismo día, el conteo no cuadra, o quiere reactivar una orden antigua de tienda."
+    subtypes: [no_cerro_ayer, varios_cierres, descuadre, reactivar_orden]
+    skill: ordenes
+    tools: [get_daily_conciliation]
+    identity: portal
+    capture: [tienda, fecha, numero_orden, captura]
+    handoff: { inbox: "Auditoría", when: "reactivar orden" }
+    always_escalate: false
+
+  - id: qr_caja
+    cd: "CD - QR y caja"
+    family: tienda
+    intercom_tag_id: 16261709
+    criteria: "El QR del kit no escanea, la caja no está vinculada al QR, o perdió o dañó el QR y necesita uno adicional."
+    subtypes: [qr_no_escanea, vincular_caja, qr_adicional]
+    skill: qr-y-caja
+    tools: [list_merchant_stores]
+    identity: portal
+    capture: [numero_caja, tienda, codigo_qr, captura_zoom, link_google_maps]
+    handoff: { inbox: "L2 - Solicitudes ABM", folio: "QR/Kits", slack: "#abm-solicitudes-inbound", flow: "Gestión de QRs y Kits", snooze_days: 15 }
+    always_escalate: false
+
+  - id: fraude_seguridad
+    cd: "CD - Fraude y seguridad"
+    family: tienda
+    intercom_tag_id: null            # crear
+    criteria: "Sospecha fraude: alteraron su QR, aceptó un comprobante falso, detectó un acceso no autorizado o un mensaje que se hace pasar por Cashea."
+    subtypes: [qr_alterado, comprobante_falso, acceso_no_autorizado, phishing]
+    skill: qr-y-caja
+    tools: [escalate_to_human]
+    identity: portal
+    capture: [que_paso, cuando, tienda, evidencia]
+    handoff: { inbox: "L2 - Bug Aliados", team: "Seguridad" }
+    always_escalate: true
+
+  - id: pago_no_recibido
+    cd: "CD - Pago no recibido"
+    family: dinero
+    intercom_tag_id: 12820486
+    retire_tag_ids: [16261659]
+    criteria: "Pregunta cuándo le pagan, dice que un pago no llegó a su banco, o que lo depositado no coincide con el reporte o con lo que ve en Merchant."
+    subtypes: [cuando_me_pagan, pago_no_llego, reporte_vs_banco, recompra, error_bancario]
+    skill: pagos-liquidacion
+    tools: [get_payouts, get_order_installments, get_daily_conciliation]
+    identity: portal
+    capture: [monto, fecha, banco, periodo, modelo]
+    handoff: { inbox: "L2 - Finanzas", folio: "Pagos no reflejados", alt_folio: "Cuenta bancaria cancelada", snooze_days: 7 }
+    always_escalate: false
+
+  - id: comisiones_tarifas
+    cd: "CD - Comisiones y tarifas"
+    family: dinero
+    intercom_tag_id: 16261663
+    criteria: "Pregunta cuánto cobra Cashea: porcentaje de comisión por rubro, servicio tecnológico e IVA, costo de Express, por qué se restan cuotas adelantadas."
+    subtypes: [tasa_por_rubro, servicio_tecnologico_iva, descuento_express, cuotas_adelantadas]
+    skill: comisiones-y-modelo
+    tools: [get_invoices, get_monthly_report]
+    identity: portal
+    capture: [linea, rubro, modelo]
+    handoff: { inbox: "L2 - Finanzas", when: "disputa un cobro" }
+    always_escalate: false
+
+  - id: cambio_modelo_o_linea
+    cd: "CD - Modelo y condiciones"
+    family: dinero
+    intercom_tag_id: 16261687
+    criteria: "Quiere cambiar condiciones comerciales: pasar de Base a Express, activar una línea, bajar el monto mínimo de orden o la inicial, línea cotidiana a 2 cuotas."
+    subtypes: [base_a_express, activar_linea, monto_minimo, bajada_inicial, lc2c, cambio_linea]
+    skill: comisiones-y-modelo
+    tools: []
+    identity: validacion_seguridad
+    capture: [modelo_actual, cambio_pedido, sedes, correo_firmante, documentos]
+    handoff: { inbox: "L2 - Métodos de pago", folio: "Cambio de línea", snooze_days: 15, alt_inbox: "L2 - Finanzas", alt_folio: "Cambio de modelo de liquidación" }
+    always_escalate: false
+
+  - id: reportes_facturas
+    cd: "CD - Reportes y facturas"
+    family: dinero
+    intercom_tag_id: 16103234
+    criteria: "Pide el reporte de un período, no recibió la factura, no entiende una línea del reporte (ajustes, signos, factoring), o pagó una factura por error."
+    subtypes: [reenviar_reporte, factura_no_recibida, leer_reporte, ajustes, pago_factura_por_error]
+    skill: reportes-facturas-retenciones
+    tools: [get_invoices, get_monthly_report, get_payouts]
+    identity: portal
+    capture: [periodo, numero_factura, correo_destino]
+    handoff: { inbox: "L2 - Finanzas", folio: "Facturas no emitidas o no recibidas", alt_folio: "Saldo a favor", snooze_days: 3 }
+    always_escalate: false
+
+  - id: retenciones
+    cd: "CD - Retenciones"
+    family: dinero
+    intercom_tag_id: 16103240
+    criteria: "Pregunta si debe retener, por qué le retienen IVA o ISLR, dónde enviar comprobantes de retención o por qué no aparecen en su reporte."
+    subtypes: [no_soy_agente, iva_islr, comprobantes_no_aparecen, donde_enviar]
+    skill: reportes-facturas-retenciones
+    tools: [get_invoices]
+    identity: portal
+    capture: [mes, numero_comprobante, rif_pdf]
+    handoff: { inbox: "L2 - Finanzas", folio: "Retenciones IVA/ISLR no procesadas", snooze_days: 3 }
+    always_escalate: false
+
+  - id: reembolso_pago_errado
+    cd: "CD - Reembolsos y pagos errados"
+    family: dinero
+    intercom_tag_id: 16103561
+    criteria: "Transfirió dinero a Cashea por error, pagó de más el fee de activación, quiere el fee de vuelta porque no sigue, o le retuvieron IVA de más."
+    subtypes: [transferencia_errada, fee_completo, fee_parcial, iva_retenido_de_mas, orden_duplicada]
+    skill: reembolsos
+    tools: []
+    identity: validacion_seguridad
+    capture: [referencia, monto_bs, fecha, cuenta_origen, titular, cedula_o_rif_cuenta, motivo, comprobante, opcion_saldo_o_reembolso]
+    handoff: { inbox: "L2 - Finanzas", folio: "Reembolsos", slack: "devoluciones-finanzas", snooze_days: 15 }
+    always_escalate: false
+
+  - id: afiliacion_requisitos
+    cd: "CD - Quiero afiliarme"
+    family: afiliacion
+    intercom_tag_id: 16261677
+    criteria: "Aún no es aliado: pregunta requisitos, documentos, costo de activación, cómo registrarse o si su rubro aplica."
+    subtypes: [requisitos_documentos, costo, como_registrarse, codigo_hunter, rubro_no_permitido]
+    skill: afiliacion-onboarding
+    tools: []
+    identity: none
+    capture: []
+    handoff: { inbox: "L2 - Onboarding", when: "código Hunter o documentos que no cargan" }
+    always_escalate: false
+
+  - id: afiliacion_estatus
+    cd: "CD - Estatus de afiliación"
+    family: afiliacion
+    intercom_tag_id: 16261669
+    retire_tag_ids: [15041053]
+    criteria: "Ya se registró, pagó o subió documentos y pregunta en qué etapa va, qué falta, por qué está trabado o cuándo podrá vender."
+    subtypes: [etapa, documentos_sin_respuesta, validacion_cuenta, fee_sin_validar, documento_rechazado]
+    skill: afiliacion-onboarding
+    tools: []
+    identity: portal
+    capture: [razon_social, rif, correo_afiliacion]
+    handoff: { inbox: "L2 - Onboarding", snooze_days: 3 }
+    always_escalate: false
+
+  - id: kit_activacion
+    cd: "CD - Kit de activación"
+    family: afiliacion
+    intercom_tag_id: 16261683
+    criteria: "Espera el kit de activación: dónde está, número de guía, cuánto tarda, qué sigue después de afiliarse."
+    subtypes: [donde_esta, numero_guia, cuanto_tarda]
+    skill: afiliacion-onboarding
+    tools: []
+    identity: portal
+    capture: [rif_o_correo]
+    handoff: { inbox: "L2 - Onboarding", when: "sin guía en HubSpot" }
+    always_escalate: false
+
+  - id: contrato_legal
+    cd: "CD - Contrato y legal"
+    family: afiliacion
+    intercom_tag_id: 16261688
+    criteria: "Pregunta qué modelo o línea tiene contratada, no recibió el contrato, pide una adenda o nueva sucursal, cambio o separación de razón social, o terminar la relación."
+    subtypes: [que_modelo_tengo, contrato_no_recibido, adenda_sucursal, razon_social, finiquito]
+    skill: datos-del-aliado
+    tools: []
+    identity: validacion_seguridad
+    capture: [rif, razon_social, documento, fecha_ultima_venta]
+    handoff: { inbox: "L2 - Legal", folio: "Adenda | Modificaciones contrato vigente | Cambio/Separación de razón social", snooze_days: 15 }
+    always_escalate: false
+
+  - id: online_activacion
+    cd: "CD - Activación Cashea Online"
+    family: online
+    intercom_tag_id: 16261719
+    retire_tag_ids: [12820499]
+    criteria: "Llenó el formulario de Cashea Online y pregunta cuándo se activa la tienda, cuenta BNC, credenciales del marketplace, inducción o cambios de logo, nombre o correo."
+    subtypes: [cuando_se_activa, credenciales_marketplace, cuenta_bnc, induccion, cambios_generales]
+    skill: cashea-online
+    tools: []
+    identity: portal
+    capture: [nombre_tienda_marketplace, razon_social, cambio]
+    handoff: { inbox: "L2 - Cashea Online", snooze_days: 15 }
+    always_escalate: false
+
+  - id: online_catalogo
+    cd: "CD - Catálogo e inventario"
+    family: online
+    intercom_tag_id: 16261717
+    criteria: "No logra cargar o editar productos en Cashea Online: planilla, imágenes, variantes, stock, estados de publicación, Modo Más Cuotas."
+    subtypes: [planilla, imagenes, variantes, error_de_carga, mas_cuotas]
+    skill: cashea-online
+    tools: []
+    identity: portal
+    capture: [nombre_tienda_marketplace, razon_social, tipo_error]
+    handoff: { inbox: "L2 - Cashea Online", folio: "Stock/Inventario" }
+    always_escalate: false
+
+  - id: online_ordenes_envios
+    cd: "CD - Envíos y órdenes online"
+    family: online
+    intercom_tag_id: 16261713
+    criteria: "Guías de envío (regenerar, peso, cancelada), qué es o cuánto cuesta Cashea Envíos, envío gratis que no aparece, cancelar o reactivar una orden del marketplace."
+    subtypes: [guia, que_es_cashea_envios, envio_gratis, cancelar_reactivar_online, demora_entrega]
+    skill: cashea-online
+    tools: [get_order_detail]
+    identity: portal
+    capture: [numero_orden, nombre_tienda_marketplace, cambio]
+    handoff: { inbox: "L2 - Cashea Online", folio: "Cambio de Órdenes | Cambio de Guías | Cashea Envíos", snooze_days: 15 }
+    always_escalate: false
+
+  - id: promociones_campanas
+    cd: "CD - Promociones y campañas"
+    family: otros
+    intercom_tag_id: null            # crear
+    criteria: "Pregunta por una campaña o cupón: 0 % de inicial, Venezuela creo en ti, Días del Club, cupón Club Cashea Más, cashback de activación, quién asume el descuento."
+    subtypes: [inicial_0, cupon_club, campana_vigente, cashback_activacion]
+    skill: promociones
+    tools: []
+    identity: none
+    capture: []
+    handoff: null
+    always_escalate: false
+
+  - id: cliente_final
+    cd: "CD - Cliente final"
+    family: otros
+    intercom_tag_id: null            # crear
+    criteria: "Quien escribe es un comprador de Cashea (su cuota, su orden, la app), no un comercio."
+    subtypes: []
+    skill: null
+    tools: []
+    identity: none
+    capture: []
+    handoff: { redirect: "ATC", profile: "buyer" }
+    always_escalate: false
+
+  - id: solicitudes_canal
+    cd: "CD - Solicitudes de canal"
+    family: otros
+    intercom_tag_id: null            # crear
+    criteria: "Pide habilitar Cashea Link, botón de pago de iniciales, integración API con su facturador, o material publicitario adicional."
+    subtypes: [cashea_link, boton_de_pago, integracion_api, material_publicitario]
+    skill: null
+    tools: []
+    identity: validacion_seguridad
+    capture: [que_pide, sistema_facturacion, cajas, contacto]
+    handoff: { inbox: "L2 - Métodos de pago", when: "botón de pago", alt_inbox: "L2 - Solicitudes ABM", alt_when: "Cashea Link", team: "Marketing" }
+    always_escalate: false

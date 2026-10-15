@@ -10,14 +10,15 @@ failure maps to the right status without leaking why.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
+from typing import Any, cast
 
 import httpx
 import pytest
 
-from service.api.v1.auth import get_host_verifier, get_merchant_api
+from service.api.v1.auth import get_merchant_api
 from service.core import session_token
 from service.core.config import Settings, get_settings
-from service.core.host_token import HostIdentity, InvalidHostToken
+from service.core.host_token import HostIdentity, InvalidHostToken, get_host_verifier
 from service.main import create_app
 
 _KEY = "test-signing-key-with-enough-entropy-0123456789"
@@ -59,7 +60,10 @@ def _settings(**overrides: str) -> Callable[[], Settings]:
         "SESSION_SIGNING_KEY": _KEY,
         **overrides,
     }
-    return lambda: Settings(**values)
+    # Settings' env aliases are typed per field (Path, int, ...); a dict of
+    # raw strings is exactly what the env source hands pydantic, so widen it
+    # to Any at this one boundary rather than re-declaring every alias here.
+    return lambda: Settings(**cast("dict[str, Any]", values))
 
 
 def _client(

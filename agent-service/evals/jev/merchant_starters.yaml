@@ -1,0 +1,420 @@
+# Mensajes de arranque del canal Aliados para probar la clasificación de CD.
+#
+# fuente: intercom → conversación cerrada de Intercom ATA (muestreo 2026-10-02).
+#   Se quitaron botones del menú, saludos, razón social, RIF y montos de
+#   identificación; se dejó la consulta en uno o dos mensajes.
+# fuente: derivado → no hubo muestra real con contenido para ese CD; el texto
+#   sale de los subtipos de Guru / Flow Readiness.
+#
+# esperado: id de driver en config/contact_drivers_aliados.yaml, o
+#   `sin_clasificar` cuando no hay consulta clasificable (Jev debe quedar < threshold).
+# tambien_valido: otros drivers aceptables en casos ambiguos.
+
+cases:
+  # --- acceso ---------------------------------------------------------------
+  - id: c01
+    fuente: intercom
+    conversation_id: "215476197637839"
+    tag_original: "CD - Actualizar mis datos"
+    mensajes:
+      - "Por motivo de hurto no puedo entrar a Cashea porque no tengo el número de teléfono ni el correo. ¿Cómo se hace en ese caso?"
+    esperado: acceso_clave
+
+  - id: c02
+    fuente: intercom
+    conversation_id: "215475996325360"
+    tag_original: "CD - Credenciales no recibidas"
+    mensajes:
+      - "No puedo acceder a Merchant, me dice clave incorrecta y es la primera vez que voy a entrar."
+    esperado: acceso_clave
+    tambien_valido: [credenciales_no_recibidas]
+
+  - id: c03
+    fuente: intercom
+    conversation_id: "215475996118976"
+    tag_original: "CD - Credenciales no recibidas"
+    mensajes:
+      - "Tengo un error con mi usuario administrativo."
+      - "Mi usuario administrador no me abre."
+    esperado: acceso_clave
+
+  - id: c04
+    fuente: intercom
+    conversation_id: "215476212127775"
+    tag_original: "CD - Activacion cashea online"
+    mensajes:
+      - "Soy aliado nuevo de Mérida. Hice el pago hace más de un mes y recibí el kit, pero no me llegó el correo con las claves de cajero, administrador y propietario, ni la clave para el cierre de caja."
+    esperado: credenciales_no_recibidas
+
+  - id: c05
+    fuente: intercom
+    conversation_id: "215476216377463"
+    tag_original: "CD - Actualizar mis datos"
+    mensajes:
+      - "¿Cómo registro el usuario de caja?"
+      - "¿Y cómo hago la primera venta?"
+    esperado: credenciales_no_recibidas
+    tambien_valido: [crear_orden]
+
+  - id: c06
+    fuente: derivado
+    mensajes:
+      - "Quiero cambiar la cuenta bancaria donde me depositan, cerramos la de Banesco y abrimos una en Mercantil."
+    esperado: actualizar_datos
+
+  # --- tienda ---------------------------------------------------------------
+  - id: c07
+    fuente: intercom
+    conversation_id: "215476120089485"
+    tag_original: "CD - Problemas con QR"
+    mensajes:
+      - "Necesito crear una orden y me sale «Lamentamos, no pudimos conseguir la información»."
+    esperado: crear_orden
+
+  - id: c08
+    fuente: intercom
+    conversation_id: "215476216622456"
+    tag_original: "CD - No me deja crear una orden"
+    mensajes:
+      - "¿Cómo hago para hacer una orden por link?"
+    esperado: crear_orden
+    tambien_valido: [solicitudes_canal]
+
+  - id: c09
+    fuente: intercom
+    conversation_id: "215476107227966"
+    tag_original: "CD - Cambio modelo de negocio"
+    mensajes:
+      - "Al cliente le sale 1 cuota y no 3."
+    esperado: crear_orden
+    tambien_valido: [contrato_legal, cambio_modelo_o_linea]
+
+  - id: c10
+    fuente: intercom
+    conversation_id: "215476215633283"
+    tag_original: "CD - Cancelar una orden"
+    mensajes:
+      - "¿Cómo hago para cancelar una orden una vez que cerré la caja?"
+    esperado: cancelar_orden
+
+  - id: c11
+    fuente: intercom
+    conversation_id: "215476213957603"
+    tag_original: "CD - Cierre de caja"
+    mensajes:
+      - "¿Qué pasa si no cierro la caja un día?"
+    esperado: cierre_caja
+
+  - id: c12
+    fuente: intercom
+    conversation_id: "215476200640107"
+    tag_original: "CD - Comisiones y pagos"
+    mensajes:
+      - "Explíquenme los cierres de caja."
+    esperado: cierre_caja
+
+  - id: c13
+    fuente: intercom
+    conversation_id: "215476120090900"
+    tag_original: "CD - Problemas con QR"
+    mensajes:
+      - "No sale el QR cuando el cliente escanea."
+    esperado: qr_caja
+
+  - id: c14
+    fuente: derivado
+    mensajes:
+      - "Una clienta me mostró un comprobante de pago móvil por la inicial y al revisar el banco nunca llegó. Creo que era falso y ya se llevó la mercancía."
+    esperado: fraude_seguridad
+
+  # --- dinero ---------------------------------------------------------------
+  - id: c15
+    fuente: intercom
+    conversation_id: "215476196723082"
+    tag_original: "CD - Pago no recibidos"
+    mensajes:
+      - "No me ha llegado el pago de 113,01 $ de la facturación del período. Mi banco es Banesco."
+    esperado: pago_no_recibido
+
+  - id: c16
+    fuente: intercom
+    conversation_id: "215476196351853"
+    tag_original: "CD - Pago no recibidos"
+    mensajes:
+      - "Un cliente pagó y no cayó en nuestra cuenta."
+    esperado: pago_no_recibido
+
+  - id: c17
+    fuente: intercom
+    conversation_id: "215476211235667"
+    tag_original: "CD - Reportes y Facturas"
+    mensajes:
+      - "¿Dónde puedo verificar los pagos que me ha hecho Cashea?"
+    esperado: pago_no_recibido
+    tambien_valido: [reportes_facturas]
+
+  - id: c18
+    fuente: intercom
+    conversation_id: "215476215243079"
+    tag_original: "CD - Reembolsos"
+    mensajes:
+      - "¿Qué es recompras?"
+    esperado: pago_no_recibido
+    tambien_valido: [reportes_facturas]
+
+  - id: c19
+    fuente: intercom
+    conversation_id: "215476216374220"
+    tag_original: "CD - Comisiones y pagos"
+    mensajes:
+      - "¿La comisión del 5 % es sobre el monto total de la venta, o cada vez que Cashea paga una cuota se descuenta una comisión adicional?"
+      - "Mi rubro es belleza y estética."
+    esperado: comisiones_tarifas
+
+  - id: c20
+    fuente: intercom
+    conversation_id: "215476212709990"
+    tag_original: "CD - Comisiones y pagos"
+    mensajes:
+      - "Quiero saber la comisión."
+    esperado: comisiones_tarifas
+
+  - id: c21
+    fuente: intercom
+    conversation_id: "215476221717971"
+    tag_original: "CD - Otros"
+    mensajes:
+      - "¿Cuánto es el porcentaje que debo pagar a Cashea?"
+      - "Estoy en modelo Express."
+    esperado: comisiones_tarifas
+
+  - id: c22
+    fuente: intercom
+    conversation_id: "215476125089298"
+    tag_original: "CD - Cambio modelo de negocio"
+    mensajes:
+      - "Quiero poder ofrecer a mis clientes comprar en cuotas y que puedan usar su cuenta principal."
+    esperado: cambio_modelo_o_linea
+
+  - id: c23
+    fuente: intercom
+    conversation_id: "215476188933963"
+    tag_original: "CD - Cambio modelo de negocio"
+    mensajes:
+      - "Había solicitado unirme de forma permanente a las campañas de 0 % de inicial para nivel seis y a las bajadas de inicial para todos los niveles, pero hoy, que debía iniciar la nueva modalidad, no está aplicada."
+    esperado: cambio_modelo_o_linea
+    tambien_valido: [promociones_campanas]
+
+  - id: c24
+    fuente: intercom
+    conversation_id: "215476211233068"
+    tag_original: "CD - Reportes y Facturas"
+    mensajes:
+      - "¿Cuál es el monto mínimo para comprar en mi establecimiento con Cashea?"
+    esperado: cambio_modelo_o_linea
+    tambien_valido: [contrato_legal]
+
+  - id: c25
+    fuente: derivado
+    mensajes:
+      - "No me ha llegado el reporte de septiembre al correo, ¿me lo pueden reenviar?"
+    esperado: reportes_facturas
+
+  - id: c26
+    fuente: derivado
+    mensajes:
+      - "No somos contribuyentes especiales y nos están reteniendo IVA. ¿Por qué?"
+    esperado: retenciones
+
+  - id: c27
+    fuente: derivado
+    mensajes:
+      - "Hice una transferencia a Cashea por error, la mandé dos veces. ¿Cómo hago para que me la devuelvan?"
+    esperado: reembolso_pago_errado
+
+  # --- afiliación -----------------------------------------------------------
+  - id: c28
+    fuente: intercom
+    conversation_id: "215476175683593"
+    tag_original: "CD - Quiero afiliarme"
+    mensajes:
+      - "¿Cuáles son los requisitos para instalar Cashea en el local?"
+    esperado: afiliacion_requisitos
+
+  - id: c29
+    fuente: intercom
+    conversation_id: "215476193949959"
+    tag_original: "CD - Recuperar mi clave"
+    mensajes:
+      - "Soy usuario de Cashea para comprar, pero me gustaría colocarlo en mi negocio."
+    esperado: afiliacion_requisitos
+
+  - id: c30
+    fuente: intercom
+    conversation_id: "215476221641716"
+    tag_original: "CD - Otros"
+    mensajes:
+      - "¿Hay que pagar algo por la afiliación? ¿Son solo los 50 $ o es algo más?"
+      - "Vendo repuestos de moto."
+    esperado: afiliacion_requisitos
+
+  - id: c31
+    fuente: intercom
+    conversation_id: "215476214700243"
+    tag_original: "CD - Reportes y Facturas"
+    mensajes:
+      - "¿El pago de afiliación lo puedo hacer desde mi cuenta personal o tiene que ser de la cuenta jurídica?"
+    esperado: afiliacion_requisitos
+    tambien_valido: [afiliacion_estatus]
+
+  - id: c32
+    fuente: intercom
+    conversation_id: "215476221086825"
+    tag_original: "CD - Estatus de afiliacion"
+    mensajes:
+      - "¿Cuánto tiempo tarda la validación del pago de activación y la revisión de la cuenta?"
+    esperado: afiliacion_estatus
+
+  - id: c33
+    fuente: intercom
+    conversation_id: "215476221341434"
+    tag_original: "CD - Otros"
+    mensajes:
+      - "¿Cuánto tarda la validación de la cuenta para terminar de registrar mi información?"
+    esperado: afiliacion_estatus
+
+  - id: c34
+    fuente: intercom
+    conversation_id: "215476221473564"
+    tag_original: "CD - Estatus de afiliacion"
+    mensajes:
+      - "¿Cómo hago para mandarles el documento del acta?"
+    esperado: afiliacion_estatus
+
+  - id: c35
+    fuente: intercom
+    conversation_id: "215476165475380"
+    tag_original: "CD - Envio del Kit de activacion"
+    mensajes:
+      - "¿Cuándo me llega el kit?"
+    esperado: kit_activacion
+
+  - id: c36
+    fuente: intercom
+    conversation_id: "215476193677168"
+    tag_original: "CD - Recuperar mi clave"
+    mensajes:
+      - "No tengo clave."
+      - "Todavía no he recibido el kit de activación."
+    esperado: kit_activacion
+    tambien_valido: [credenciales_no_recibidas]
+
+  - id: c37
+    fuente: intercom
+    conversation_id: "215476215444691"
+    tag_original: "CD - Consulta sobre contrato"
+    mensajes:
+      - "Quería saber si mi establecimiento cuenta con las dos cuotas para línea cotidiana. Los clientes me preguntan y de verdad no sé."
+    esperado: contrato_legal
+    tambien_valido: [cambio_modelo_o_linea]
+
+  - id: c38
+    fuente: derivado
+    mensajes:
+      - "Vamos a cerrar el local a fin de mes y queremos terminar el contrato con Cashea. ¿Qué tenemos que hacer?"
+    esperado: contrato_legal
+
+  # --- online ---------------------------------------------------------------
+  - id: c39
+    fuente: intercom
+    conversation_id: "215476200238942"
+    tag_original: "CD - Activacion cashea online"
+    mensajes:
+      - "¿Cómo hago para activar Cashea Online?"
+    esperado: online_activacion
+
+  - id: c40
+    fuente: derivado
+    mensajes:
+      - "Llené el formulario de Cashea Online hace tres semanas y la tienda todavía no aparece en el marketplace."
+    esperado: online_activacion
+
+  - id: c41
+    fuente: intercom
+    conversation_id: "215476218087357"
+    tag_original: "CD - Inventario"
+    mensajes:
+      - "¿Cómo hago para subir la mercancía en Cashea?"
+    esperado: online_catalogo
+
+  - id: c42
+    fuente: intercom
+    conversation_id: "215476198108863"
+    tag_original: "CD - Inventario"
+    mensajes:
+      - "¿Cómo puedo subir las imágenes de mis productos al Excel?"
+    esperado: online_catalogo
+
+  - id: c43
+    fuente: intercom
+    conversation_id: "215476215902511"
+    tag_original: "CD - Cierre de caja"
+    mensajes:
+      - "Tengo 3 envíos pendientes: uno ya lo llevé a la agencia hace rato y me sigue saliendo pendiente."
+      - "Los otros dos los clientes me pidieron cancelarlos porque el envío iba a llegar muy tarde."
+    esperado: online_ordenes_envios
+
+  - id: c44
+    fuente: intercom
+    conversation_id: "215476141345192"
+    tag_original: "CD - Problemas con QR"
+    mensajes:
+      - "Necesito cambio de peso y refrescamiento de la guía MRW."
+    esperado: online_ordenes_envios
+
+  # --- otros ----------------------------------------------------------------
+  - id: c45
+    fuente: derivado
+    mensajes:
+      - "¿La campaña de 0 % de inicial la asume Cashea o me la descuentan a mí?"
+    esperado: promociones_campanas
+
+  - id: c46
+    fuente: derivado
+    mensajes:
+      - "Compré una nevera con Cashea y no me aparece la cuota en la app, ¿cuándo me toca pagar?"
+    esperado: cliente_final
+
+  - id: c47
+    fuente: derivado
+    mensajes:
+      - "Queremos integrar Cashea con nuestro sistema de facturación, usamos Megasoft."
+    esperado: solicitudes_canal
+
+  # --- sin consulta clasificable (residual) ---------------------------------
+  - id: c48
+    fuente: intercom
+    conversation_id: "215475996187422"
+    tag_original: "CD - Credenciales no recibidas"
+    mensajes:
+      - "Mail y contraseña"
+    esperado: sin_clasificar
+    tambien_valido: [acceso_clave, credenciales_no_recibidas]
+
+  - id: c49
+    fuente: intercom
+    conversation_id: "215476182880971"
+    tag_original: "CD - Reembolsos"
+    mensajes:
+      - "Tengo un problema con mi pago."
+    esperado: sin_clasificar
+    tambien_valido: [pago_no_recibido]
+
+  - id: c50
+    fuente: intercom
+    conversation_id: "215476202744454"
+    tag_original: "CD - Cierre de caja"
+    mensajes:
+      - "¿Cómo lo activo?"
+      - "¿Cuál es el siguiente paso?"
+    esperado: sin_clasificar
