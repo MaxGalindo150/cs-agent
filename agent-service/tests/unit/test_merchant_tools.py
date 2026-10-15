@@ -103,12 +103,12 @@ async def test_search_sends_the_filters_and_the_aliados_token() -> None:
         {
             "order_uuid": _UUID,
             "order_number": 123456,
-            "created_at": "2026-10-14T15:00:00Z",
+            "created_at": "2026-10-14 11:00 (hora de Venezuela)",
             "amount": 50,
             "status": "Abierta: esperando que el comprador la confirme en su app",
             "store": "Centro",
-            "channel": "IN_STORE",
-            "delivery_status": "DELIVERED",
+            "channel": "QR",
+            "delivery_status": "No aplica",  # an Abierta order isn't delivered
         }
     ]
 
@@ -337,3 +337,18 @@ async def test_an_unknown_status_passes_through() -> None:
     out = json.loads(await make_search_orders_tool(api.client()).fn(ctx=_ALIADO))
 
     assert out["orders"][0]["status"] == "SOMETHING_NEW"
+
+
+async def test_delivery_is_shown_only_once_the_buyer_took_the_order() -> None:
+    rows = [
+        {**_ROW, "statusName": "IN_PROGRESS", "deliveryStatus": "DELIVERED"},
+        {**_ROW, "statusName": "CANCELLED", "deliveryStatus": "DELIVERED"},
+    ]
+    api = _Api(_ok({"data": rows}))
+
+    out = json.loads(await make_search_orders_tool(api.client()).fn(ctx=_ALIADO))
+
+    assert [o["delivery_status"] for o in out["orders"]] == [
+        "Entregado",
+        "Orden cancelada",
+    ]

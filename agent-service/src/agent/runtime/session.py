@@ -18,9 +18,9 @@ optional: with no `memory` wired, a Session is just the SOUL + clock.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from typing import Any
 
+from agent import clock
 from agent.identity import AUDIENCES, Audience, Principal, audience_of
 from agent.observability import LoopEvent, Observer
 from agent.prompts import load_prompt
@@ -91,9 +91,9 @@ class Session:
     ) -> str:
         audience = audience_of(principal)
         user_id = principal.user_id if principal else None
-        # The service should know the request-handling clock so the model can
-        # resolve relative dates ("ayer", "en 30 minutos"). TODO: timezone via env.
-        now = datetime.now().astimezone()
+        # Venezuelan time, so the model resolves relative dates ("ayer", "en
+        # 30 minutos") the way the user means them.
+        now = clock.now()
         parts = [load_soul(audience)]
         context = caller_context(principal)
         if context:
