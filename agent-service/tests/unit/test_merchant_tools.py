@@ -105,7 +105,7 @@ async def test_search_sends_the_filters_and_the_aliados_token() -> None:
             "order_number": 123456,
             "created_at": "2026-10-14T15:00:00Z",
             "amount": 50,
-            "status": "OPEN",
+            "status": "Abierta: esperando que el comprador la confirme en su app",
             "store": "Centro",
             "channel": "IN_STORE",
             "delivery_status": "DELIVERED",
@@ -190,13 +190,13 @@ async def test_detail_lets_through_only_the_allowlisted_fields() -> None:
 
     assert api.requests[0].url.path == f"/v2/orders/{_UUID}"
     assert out["order_number"] == 123456
-    assert out["status"] == "Open"
+    assert out["status"].startswith("Abierta")
     assert out["paid_to_merchant"] is False
     assert out["buyer"] == {"name": "María Pérez", "id_number": "V12345678"}
     assert out["installments"][0] == {
         "number": 1,
         "amount": 20,
-        "status": "PENDING",
+        "status": "En verificación: pago registrado, Cashea lo revisa",
         "due_date": "2026-10-28",
     }
     assert out["shipment_status"] == "IN_TRANSIT"
@@ -328,3 +328,12 @@ async def test_errors_never_echo_the_token() -> None:
 
     assert "500" in out
     assert "aliado-firebase-token" not in out
+
+
+async def test_an_unknown_status_passes_through() -> None:
+    row = {**_ROW, "statusName": "SOMETHING_NEW"}
+    api = _Api(_ok({"data": [row]}))
+
+    out = json.loads(await make_search_orders_tool(api.client()).fn(ctx=_ALIADO))
+
+    assert out["orders"][0]["status"] == "SOMETHING_NEW"

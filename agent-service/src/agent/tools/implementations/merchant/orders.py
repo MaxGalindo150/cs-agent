@@ -22,6 +22,26 @@ from agent.tools.implementations.merchant._http import Found, merchant_get
 from agent.tools.registry import Tool
 
 STATUSES = ("OPEN", "IN_PROGRESS", "CLOSED", "CANCELLED", "PENDING")
+# How the portal names each status (merchant-web OrderStatusMapper.ts), and
+# what it means — so the agent says "Pagada", never "CLOSED" or "Open".
+_STATUS_LABELS = {
+    "OPEN": "Abierta: esperando que el comprador la confirme en su app",
+    "PENDING": "Pendiente: el comprador confirmó, falta el pago inicial",
+    "IN_PROGRESS": "En progreso: inicial pagada, el comprador paga sus cuotas",
+    "CLOSED": "Pagada",
+    "CANCELLED": "Cancelada",
+}
+# Installment statuses as the portal's payment plan shows them
+# (merchant-web OrderDetails.helper.ts / InstallmentStatus.ts).
+_INSTALLMENT_LABELS = {
+    "SCHEDULED": "Agendada",
+    "DONE": "Pagada",
+    "PENDING": "En verificación: pago registrado, Cashea lo revisa",
+    "DELAYED": "Atrasada",
+    "GRACED": "En período de gracia",
+    "RENEGOTIATED": "Renegociada",
+    "CANCELLED": "Cancelada",
+}
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -161,7 +181,7 @@ def _summary(row: dict[str, Any]) -> dict[str, Any]:
         "order_number": row.get("orderNumber"),
         "created_at": row.get("createdAt"),
         "amount": row.get("amount"),
-        "status": row.get("statusName"),
+        "status": _label(_STATUS_LABELS, row.get("statusName")),
         "store": row.get("storeName"),
         "channel": row.get("channel"),
         "delivery_status": row.get("deliveryStatus"),
@@ -172,6 +192,9 @@ def _detail(order: dict[str, Any]) -> dict[str, Any]:
     """An allowlist, not a blocklist: a new field the backend adds (say, a
     buyer's address) stays out until someone decides it belongs here."""
     status = order.get("status")
+    status_code = (
+        status.get("name") if isinstance(status, dict) else order.get("statusName")
+    )
     payment = order.get("paymentDetails") or {}
     buyer = payment.get("user") or {}
     cancellation = order.get("cancellationData") or {}
@@ -179,9 +202,7 @@ def _detail(order: dict[str, Any]) -> dict[str, Any]:
     return {
         "order_number": order.get("identifierNumber"),
         "created_at": order.get("createdAt"),
-        "status": status.get("displayName") or status.get("name")
-        if isinstance(status, dict)
-        else order.get("statusName"),
+        "status": _label(_STATUS_LABELS, status_code),
         "amount": order.get("amount"),
         "down_payment_amount": order.get("downPaymentAmount"),
         "financed_amount": order.get("financedAmount"),
@@ -199,7 +220,7 @@ def _detail(order: dict[str, Any]) -> dict[str, Any]:
             {
                 "number": i.get("installmentNumber"),
                 "amount": i.get("amount"),
-                "status": i.get("status"),
+                "status": _label(_INSTALLMENT_LABELS, i.get("status")),
                 "due_date": i.get("scheduledPaymentDate"),
             }
             for i in (payment.get("installments") or [])
@@ -220,3 +241,9 @@ def _detail(order: dict[str, Any]) -> dict[str, Any]:
         else None,
         "shipment_status": shipment.get("status") if shipment else None,
     }
+
+
+def _label(labels: dict[str, str], code: Any) -> Any:
+    """The portal's name for a status code; an unknown code passes through
+    as-is rather than being hidden."""
+    return labels.get(code, code) if isinstance(code, str) else code
