@@ -24,6 +24,7 @@ from typing import Any, Literal
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 
 from agent.app import Agent, build_agent
+from agent.decide.jev import Decider
 from agent.memory.db import Database
 from agent.tools.registry import ToolRegistry
 
@@ -95,6 +96,9 @@ def make_agent(
     fast_model: str = "fake-fast-model",
     trace_dir: Path | None = None,
     max_iterations: int = 10,
+    decider: Decider | None = None,
+    max_tool_calls: int | None = 25,
+    max_turn_tokens: int | None = 80_000,
 ) -> Agent:
     """Assemble a wired ``Agent`` over the test DB with a fake model injected.
 
@@ -114,4 +118,7 @@ def make_agent(
         fast_model=fast_model,
         trace_dir=trace_dir,
         max_iterations=max_iterations,
+        decider=decider,
+        max_tool_calls=max_tool_calls,
+        max_turn_tokens=max_turn_tokens,
     )
