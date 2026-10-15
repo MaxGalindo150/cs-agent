@@ -1,3 +1,4 @@
+import { Cheo } from "@/components/chat/cheo";
 import { ChoicePrompt } from "@/components/chat/choice-prompt";
 import { FeedbackButtons } from "@/components/chat/feedback-buttons";
 import { Markdown } from "@/components/chat/markdown";
@@ -150,17 +151,12 @@ function StreamingCursor() {
   );
 }
 
-/** Three bouncing dots shown before the first token arrives. */
+/** Cheo thinking, shown before the first token arrives. */
 function TypingDots() {
   return (
-    <span className="flex items-center gap-1 py-2">
-      {[0, 150, 300].map((delay) => (
-        <span
-          key={delay}
-          className="size-2 animate-bounce rounded-full bg-muted-foreground"
-          style={{ animationDelay: `${delay}ms` }}
-        />
-      ))}
+    <span className="flex py-1" role="status">
+      <Cheo mood="thinking" className="h-8 w-10" />
+      <span className="sr-only">Cheo está pensando</span>
     </span>
   );
 }

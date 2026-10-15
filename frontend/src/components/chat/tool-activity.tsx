@@ -3,6 +3,7 @@
 import { Check, ChevronDown, Search, Wrench } from "lucide-react";
 import { useState } from "react";
 
+import { Cheo } from "@/components/chat/cheo";
 import type { ActivityStep } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +41,7 @@ export function ToolActivity({ steps, streaming = false }: ToolActivityProps) {
         aria-expanded={expanded}
         className="group flex items-center gap-1 rounded text-muted-foreground transition-colors duration-150 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
+        {streaming && <Cheo mood="thinking" className="mr-1 h-5 w-6" />}
         <span className={cn(streaming && "text-shimmer")}>
           {summarize(steps, streaming)}
         </span>

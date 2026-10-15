@@ -1,5 +1,7 @@
 import { SquarePen } from "lucide-react";
+import { useEffect, useState } from "react";
 
+import { Cheo } from "@/components/chat/cheo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -23,26 +25,44 @@ interface ChatHeaderProps {
    * sidebar to fall back on.
    */
   alwaysShowNewChat?: boolean;
+  /** A reply is on its way: the avatar thinks, then cheers when it lands. */
+  busy?: boolean;
 }
 
-/** Top bar: the assistant's avatar with a live dot, its name and subtitle,
- *  and a new-chat button. */
+/** How long Cheo stays ^^ after a reply lands. */
+const HAPPY_MS = 1400;
+
+/** Top bar: Cheo as the avatar (thinking while a reply streams), the name
+ *  and subtitle, and a new-chat button. */
 export function ChatHeader({
   title,
   subtitle,
   onNewChat,
   identityLabel,
   alwaysShowNewChat,
+  busy = false,
 }: ChatHeaderProps) {
+  // Happy on the busy → idle edge. Adjusted during render rather than in an
+  // effect (react-hooks/set-state-in-effect); the effect only times it out.
+  const [prevBusy, setPrevBusy] = useState(busy);
+  const [happy, setHappy] = useState(false);
+  if (busy !== prevBusy) {
+    setPrevBusy(busy);
+    setHappy(!busy);
+  }
+  useEffect(() => {
+    if (!happy) return;
+    const timer = setTimeout(() => setHappy(false), HAPPY_MS);
+    return () => clearTimeout(timer);
+  }, [happy]);
+
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
       <div className="flex min-w-0 items-center gap-3">
-        <span className="relative shrink-0" aria-hidden>
-          <span className="flex size-9 items-center justify-center rounded-full bg-brand text-sm font-bold text-brand-foreground">
-            {title.charAt(0)}
-          </span>
-          <span className="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-background bg-emerald-500" />
-        </span>
+        <Cheo
+          mood={busy ? "thinking" : happy ? "happy" : "idle"}
+          className="h-9 w-11 shrink-0"
+        />
         <div className="flex min-w-0 flex-col leading-tight">
           <span className="truncate text-sm font-semibold tracking-tight text-foreground">
             {title}

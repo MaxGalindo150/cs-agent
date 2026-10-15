@@ -16,9 +16,10 @@
  *     casheaChat.destroy();
  *   </script>
  *
- * Injects a launcher bubble and, on first open, an iframe to <chat-host>/embed
- * that holds the whole chat UI. Plain JS (no build step) with inline styles so
- * it runs on any host and the host's CSS can't restyle it.
+ * Injects the launcher — Cheo, a floating yellow cloud — and, on first open,
+ * an iframe to <chat-host>/embed that holds the whole chat UI. Plain JS (no
+ * build step) with inline styles so it runs on any host; the few keyframes
+ * live in one injected <style>, scoped to the launcher's id.
  *
  * Token handshake (see frontend/src/lib/host/host-identity.ts): the iframe
  * posts {type: "cashea-chat:token-request", id}; this loader calls getToken()
@@ -45,16 +46,55 @@
   var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   var GREETED_KEY = "cashea-chat:greeted";
   var EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
+  var SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
-  var ICON_CHAT =
-    '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>';
-  var ICON_CLOSE =
-    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+  // Cheo: same cloud as frontend/src/components/chat/cheo.tsx — keep the two
+  // in sync. Puffy all the way round, floating over a soft shadow.
+  var LOBES = [
+    [40, 46, 20], [64, 36, 25], [88, 48, 18], [34, 61, 15],
+    [52, 66, 17], [74, 66, 18], [93, 61, 14], [64, 54, 24],
+  ];
+  var EYES_OPEN =
+    '<ellipse class="cc-eye" cx="56" cy="56" rx="4.6" ry="7"/>' +
+    '<ellipse class="cc-eye" cx="72" cy="56" rx="4.6" ry="7"/>';
+  var EYES_HAPPY =
+    '<path class="cc-squint" d="M50 58 q6 -8 12 0"/><path class="cc-squint" d="M66 58 q6 -8 12 0"/>';
+  var CHEO =
+    '<svg class="cc-cheo" viewBox="8 4 112 96" width="76" height="68" aria-hidden="true">' +
+    '<defs><linearGradient id="cashea-cheo-fill" gradientUnits="userSpaceOnUse" x1="0" y1="12" x2="0" y2="84">' +
+    '<stop offset="0" stop-color="#fffc8a"/><stop offset="0.55" stop-color="#fdfa3d"/><stop offset="1" stop-color="#f6ec1f"/>' +
+    '</linearGradient><filter id="cashea-cheo-soft" x="-50%" y="-200%" width="200%" height="500%">' +
+    '<feGaussianBlur stdDeviation="2.4"/></filter></defs>' +
+    '<ellipse class="cc-ground" cx="64" cy="94" rx="30" ry="3.6" filter="url(#cashea-cheo-soft)"/>' +
+    '<g class="cc-body">' +
+    LOBES.map(function (l) {
+      return '<circle cx="' + l[0] + '" cy="' + l[1] + '" r="' + l[2] + '" fill="url(#cashea-cheo-fill)"/>';
+    }).join("") +
+    '<g class="cc-eyes">' + EYES_OPEN + "</g></g></svg>";
 
-  // Luz tokens (merchant-web): yellow-cashea-500, gray-1000, gray-200, shadow-xl.
-  var YELLOW = "#FDFA3D";
+  // Idle float + blink, the open squash, and the happy ^^. Scoped by id so
+  // nothing leaks into the host page; all of it stops under reduced motion.
+  var STYLE =
+    "#cashea-chat-launcher .cc-cheo{display:block;overflow:visible}" +
+    "#cashea-chat-launcher .cc-body,#cashea-chat-launcher .cc-ground,#cashea-chat-launcher .cc-eye{transform-box:fill-box}" +
+    "#cashea-chat-launcher .cc-body{transform-origin:50% 100%;animation:cc-float 3.2s ease-in-out infinite alternate}" +
+    "#cashea-chat-launcher .cc-ground{fill:rgba(24,25,25,.16);transform-origin:center;animation:cc-ground 3.2s ease-in-out infinite alternate}" +
+    "#cashea-chat-launcher .cc-eyes{transition:transform 160ms " + EASE + "}" +
+    "#cashea-chat-launcher .cc-eye{fill:#181919;transform-origin:center;animation:cc-blink 4.8s infinite}" +
+    "#cashea-chat-launcher .cc-squint{fill:none;stroke:#181919;stroke-width:3.2;stroke-linecap:round}" +
+    "#cashea-chat-launcher.cc-squash .cc-cheo{animation:cc-squash 320ms " + SPRING + "}" +
+    "@keyframes cc-float{to{transform:translateY(-4px)}}" +
+    "@keyframes cc-ground{to{transform:scale(.82);opacity:.6}}" +
+    "@keyframes cc-blink{0%,93%,100%{transform:scaleY(1)}95%{transform:scaleY(.12)}}" +
+    "@keyframes cc-squash{35%{transform:scale(1.14,.86)}70%{transform:scale(.96,1.04)}}" +
+    "@media (prefers-reduced-motion:reduce){#cashea-chat-launcher *{animation:none!important;transition:none!important}}";
+
+  // Luz tokens (merchant-web): gray-1000, gray-200, shadow-xl.
   var INK = "#181919";
   var BORDER = "#E6E7E8";
+  var reducedMotion = window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)")
+    : { matches: false };
   var SHADOW = "0px 12px 40px 0px rgba(121, 125, 134, 0.2)";
   var Z = "2147483000";
 
@@ -87,31 +127,47 @@
     launcher.id = "cashea-chat-launcher";
     launcher.type = "button";
     launcher.setAttribute("aria-label", "Abrir chat de soporte");
-    launcher.innerHTML = ICON_CHAT;
+    launcher.setAttribute("aria-expanded", "false");
+    launcher.innerHTML = CHEO;
     css(launcher, {
       position: "fixed",
-      right: "24px",
-      bottom: "24px",
-      width: "56px",
-      height: "56px",
-      borderRadius: "9999px",
+      right: "20px",
+      bottom: "16px",
+      width: "76px",
+      height: "68px",
       border: "none",
-      background: YELLOW,
-      color: INK,
-      boxShadow: SHADOW,
+      background: "none",
       cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
+      display: "block",
       padding: "0",
       zIndex: Z,
-      transition: "transform 200ms " + EASE + ", box-shadow 200ms " + EASE,
+      transition: "transform 200ms " + SPRING,
+      WebkitTapHighlightColor: "transparent",
     });
+    var eyes = launcher.querySelector(".cc-eyes");
+
+    var style = document.createElement("style");
+    style.id = "cashea-chat-style";
+    style.textContent = STYLE;
+    document.head.appendChild(style);
+
+    // Hover lifts Cheo a little and it looks at the pointer.
     launcher.addEventListener("mouseenter", function () {
-      launcher.style.transform = "scale(1.06)";
+      launcher.style.transform = "translateY(-2px) scale(1.04)";
     });
     launcher.addEventListener("mouseleave", function () {
-      launcher.style.transform = "scale(1)";
+      launcher.style.transform = "";
+      eyes.style.transform = "";
+    });
+    launcher.addEventListener("pointermove", function (event) {
+      if (open || reducedMotion.matches) return;
+      var r = launcher.getBoundingClientRect();
+      var dx = event.clientX - (r.left + r.width / 2);
+      var dy = event.clientY - (r.top + r.height * 0.55);
+      var d = Math.hypot(dx, dy) || 1;
+      var k = Math.min(1, d / 30);
+      eyes.style.transform =
+        "translate(" + ((dx / d) * 3 * k).toFixed(2) + "px," + ((dy / d) * 2 * k).toFixed(2) + "px)";
     });
 
     // Built on first open, so a host page that never opens the chat never
@@ -133,24 +189,23 @@
       css(el, {
         position: "fixed",
         right: "24px",
-        bottom: "96px",
+        bottom: "92px",
         width: "400px",
         height: "640px",
         maxWidth: "calc(100vw - 32px)",
-        maxHeight: "calc(100vh - 120px)",
+        maxHeight: "calc(100vh - 116px)",
         borderRadius: "16px",
         border: "1px solid " + BORDER,
         overflow: "hidden",
         background: "#FFFFFF",
         boxShadow: SHADOW,
         zIndex: Z,
-        // Starts hidden; setOpen() animates it in.
+        // Starts hidden, tucked into Cheo; setOpen() grows it out of the
+        // cloud (the origin sits on the launcher, below the panel).
         opacity: "0",
-        transform: "translateY(12px) scale(0.98)",
-        transformOrigin: "bottom right",
+        transform: closedTransform(),
+        transformOrigin: "calc(100% - 38px) calc(100% + 42px)",
         visibility: "hidden",
-        transition:
-          "opacity 200ms " + EASE + ", transform 200ms " + EASE + ", visibility 0s linear 200ms",
       });
       el.appendChild(frame);
       document.body.appendChild(el);
@@ -194,6 +249,11 @@
         );
     }
 
+    // Reduced motion keeps only a fade: no growing out of the cloud.
+    function closedTransform() {
+      return reducedMotion.matches ? "none" : "scale(0.2)";
+    }
+
     function setOpen(next) {
       if (next === open) return;
       open = next;
@@ -206,27 +266,26 @@
         css(panel, open
           ? {
               opacity: "1",
-              transform: "translateY(0) scale(1)",
+              transform: "scale(1)",
               visibility: "visible",
               transition:
-                "opacity 200ms " + EASE + ", transform 200ms " + EASE + ", visibility 0s",
+                "opacity 180ms " + EASE + ", transform 360ms " + SPRING + ", visibility 0s",
             }
           : {
               opacity: "0",
-              transform: "translateY(12px) scale(0.98)",
+              transform: closedTransform(),
               visibility: "hidden",
               transition:
-                "opacity 150ms ease-in, transform 150ms ease-in, visibility 0s linear 150ms",
+                "opacity 160ms ease-in, transform 180ms ease-in, visibility 0s linear 180ms",
             });
       }
-      launcher.innerHTML = open ? ICON_CLOSE : ICON_CHAT;
-      var icon = launcher.firstChild;
-      if (icon && icon.animate) {
-        icon.animate(
-          [{ transform: "rotate(-90deg) scale(0.6)", opacity: 0 }, { transform: "none", opacity: 1 }],
-          { duration: 200, easing: EASE }
-        );
-      }
+      // Open: Cheo smiles ^^ (and stays the button that closes the chat).
+      eyes.style.transform = "";
+      eyes.innerHTML = open ? EYES_HAPPY : EYES_OPEN;
+      launcher.classList.remove("cc-squash");
+      void launcher.offsetWidth;
+      launcher.classList.add("cc-squash");
+      launcher.setAttribute("aria-expanded", String(open));
       launcher.setAttribute("aria-label", open ? "Cerrar chat de soporte" : "Abrir chat de soporte");
       if (open) hideGreeting();
     }
@@ -268,8 +327,8 @@
       greeting.textContent = greetingText;
       css(greeting, {
         position: "fixed",
-        right: "92px",
-        bottom: "32px",
+        right: "104px",
+        bottom: "34px",
         maxWidth: "240px",
         padding: "10px 14px",
         borderRadius: "16px 16px 4px 16px",
@@ -309,6 +368,7 @@
         if (greetingTimer) clearTimeout(greetingTimer);
         if (greeting) greeting.remove();
         launcher.remove();
+        style.remove();
         if (panel) panel.remove();
       },
     };

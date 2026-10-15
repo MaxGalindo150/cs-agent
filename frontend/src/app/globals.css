@@ -252,3 +252,126 @@
     background-color: color-mix(in oklch, var(--border), white 20%);
   }
 }
+
+/* Cheo, the Cashea cloud (components/chat/cheo.tsx). The eyes and squint
+   use the ink colour on purpose: Cheo looks the same on any theme. */
+.cheo {
+  display: block;
+  overflow: visible;
+}
+.cheo .cheo-eye {
+  fill: #181919;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.cheo .cheo-squint {
+  fill: none;
+  stroke: #181919;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+}
+.cheo .cheo-ground {
+  fill: rgb(24 25 25 / 0.16);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.dark:not(.theme-cashea, .theme-cashea *) .cheo .cheo-ground {
+  fill: rgb(0 0 0 / 0.55);
+}
+.cheo .cheo-body,
+.cheo .cheo-eyes {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cheo .cheo-puffs circle {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Idle: floats over a shadow that shrinks as it rises, and blinks. */
+.cheo-idle .cheo-body {
+  animation: cheo-float 3.2s ease-in-out infinite alternate;
+}
+.cheo-idle .cheo-ground {
+  animation: cheo-ground 3.2s ease-in-out infinite alternate;
+}
+.cheo-idle .cheo-eye {
+  animation: cheo-blink 4.8s infinite;
+}
+/* Thinking: eyes up, the cloud breathes, little puffs rise. */
+.cheo-thinking .cheo-body {
+  animation: cheo-breathe 1.4s ease-in-out infinite alternate;
+}
+.cheo-thinking .cheo-eyes {
+  transform: translate(3px, -4px);
+}
+.cheo-thinking .cheo-puffs circle {
+  animation: cheo-puff 1.8s ease-out infinite;
+}
+.cheo-thinking .cheo-puffs circle:nth-child(2) {
+  animation-delay: 0.3s;
+}
+.cheo-thinking .cheo-puffs circle:nth-child(3) {
+  animation-delay: 0.6s;
+}
+/* Happy: ^^ and one hop. */
+.cheo-happy .cheo-body {
+  animation: cheo-hop 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes cheo-float {
+  to {
+    transform: translateY(-4px);
+  }
+}
+@keyframes cheo-ground {
+  to {
+    transform: scale(0.82);
+    opacity: 0.6;
+  }
+}
+@keyframes cheo-blink {
+  0%,
+  93%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.12);
+  }
+}
+@keyframes cheo-breathe {
+  to {
+    transform: scale(1.035, 0.975);
+  }
+}
+@keyframes cheo-puff {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.6);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-8px) scale(1);
+  }
+}
+@keyframes cheo-hop {
+  30% {
+    transform: translateY(-6px) scale(0.96, 1.05);
+  }
+  60% {
+    transform: translateY(0) scale(1.05, 0.95);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cheo * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
