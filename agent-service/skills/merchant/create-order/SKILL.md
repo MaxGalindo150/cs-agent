@@ -37,8 +37,8 @@ orden"** → **"Copiar link"** and send it to the buyer. Needs no caja.
 - "Tienes una orden pendiente" (QR) → the last order on that caja is still
   Pendiente: open it ("Ir al detalle") and finish or cancel it first.
 - "Tu caja aún no está configurada" / "Aún no tienes disponible esta opción"
-  / "Tu tienda no tiene acceso en este momento" → needs Cashea support:
-  escalate_to_human.
+  / "Tu tienda no tiene acceso en este momento" → only Cashea can
+  fix it: send them to Cashea support.
 - "Tu comprador no tiene cuenta en Cashea" → the buyer must register in the
   app. "Tu comprador no tiene la cuenta activa" → they must finish verifying
   their account in the app. "Tu comprador tiene pagos pendientes" → they must

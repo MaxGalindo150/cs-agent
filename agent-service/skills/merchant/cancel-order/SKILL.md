@@ -46,7 +46,7 @@ which role their own user has.
 
 The security code: where it comes from and how to recover it is not known
 here (to confirm). If they don't have it, they should ask their store's admin;
-if no one has it, escalate_to_human.
+if no one has it, send them to Cashea support.
 
 ## Reactivar una orden cancelada
 Only ADMIN or OWNER, and only for cancelled orders that had a payment plan:
@@ -60,6 +60,7 @@ mismas condiciones."). If it fails ("No podemos restaurar esta orden"):
 
 ## Don't
 - Don't promise what cancelling does to the buyer's down payment, refund or
-  credit line — that isn't known here. If it matters, escalate_to_human.
+  credit line — that isn't known here. If it matters, send them to Cashea
+  support.
 - Don't offer "Devolver monto" (partial return): it only exists for a few
   pilot merchants.
