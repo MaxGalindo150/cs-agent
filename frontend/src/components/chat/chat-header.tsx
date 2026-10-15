@@ -5,11 +5,14 @@ import { cn } from "@/lib/utils";
 
 interface ChatHeaderProps {
   title: string;
+  /** A short line under the title, e.g. "Soporte Cashea". */
+  subtitle?: string;
   /** Start a new conversation. When omitted, the button is hidden. */
   onNewChat?: () => void;
   /** Who the widget thinks it's talking to, e.g. "Alice Johnson" or "Invitado"
-   *  (see lib/identity/). Shown as a small subtitle for verifying the
-   *  identity harness without opening devtools. */
+   *  (see lib/identity/). Shown as a small chip for verifying the identity
+   *  harness without opening devtools; omit it where the user already knows
+   *  who they are (the embed). */
   identityLabel?: string;
   /**
    * Show the inline new-chat button regardless of viewport width. Normally
@@ -22,25 +25,34 @@ interface ChatHeaderProps {
   alwaysShowNewChat?: boolean;
 }
 
-/** Slim top bar: title with a live status dot, and a new-chat button. */
+/** Top bar: the assistant's avatar with a live dot, its name and subtitle,
+ *  and a new-chat button. */
 export function ChatHeader({
   title,
+  subtitle,
   onNewChat,
   identityLabel,
   alwaysShowNewChat,
 }: ChatHeaderProps) {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
-      <div className="flex items-center gap-2.5">
-        <span className="relative flex size-2" aria-hidden>
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-60" />
-          <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="relative shrink-0" aria-hidden>
+          <span className="flex size-9 items-center justify-center rounded-full bg-brand text-sm font-bold text-brand-foreground">
+            {title.charAt(0)}
+          </span>
+          <span className="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-background bg-emerald-500" />
         </span>
-        <span className="text-sm font-medium tracking-tight text-foreground">
-          {title}
-        </span>
+        <div className="flex min-w-0 flex-col leading-tight">
+          <span className="truncate text-sm font-semibold tracking-tight text-foreground">
+            {title}
+          </span>
+          {subtitle && (
+            <span className="truncate text-xs text-muted-foreground">{subtitle}</span>
+          )}
+        </div>
         {identityLabel && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="truncate rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             como {identityLabel}
           </span>
         )}

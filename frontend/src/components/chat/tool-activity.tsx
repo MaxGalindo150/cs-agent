@@ -91,7 +91,8 @@ function Row({
   );
 }
 
-/** The collapsed one-liner: "Busqué en memoria, usé 2 herramientas". */
+/** The collapsed one-liner: what was done, in the tools' own words —
+ *  "Consulté tus órdenes · Revisé la orden" — never a count of "tools". */
 function summarize(steps: ActivityStep[], streaming: boolean): string {
   if (streaming) {
     // Name what is happening right now, falling back to the last thing done.
@@ -99,14 +100,8 @@ function summarize(steps: ActivityStep[], streaming: boolean): string {
     return running?.label ?? steps[steps.length - 1]?.label ?? "Trabajando";
   }
 
-  const parts: string[] = [];
-  if (steps.some((s) => s.kind === "memory")) parts.push("Busqué en memoria");
-
-  const tools = steps.filter((s) => s.kind === "tool").length;
-  if (tools > 0) {
-    const count = `${tools} herramienta${tools === 1 ? "" : "s"}`;
-    parts.push(parts.length > 0 ? `usé ${count}` : `Usé ${count}`);
-  }
-
-  return parts.join(", ");
+  const done = [...new Set(steps.filter((s) => s.kind === "tool").map((s) => s.label))];
+  if (done.length === 0) return "Revisé lo que hablamos";
+  if (done.length <= 2) return done.join(" · ");
+  return `${done[0]} y ${done.length - 1} más`;
 }

@@ -1,5 +1,7 @@
 import { ChoicePrompt } from "@/components/chat/choice-prompt";
 import { Markdown } from "@/components/chat/markdown";
+import { OrderCards } from "@/components/chat/order-cards";
+import { SuggestionChips } from "@/components/chat/suggestion-chips";
 import { ToolActivity } from "@/components/chat/tool-activity";
 import type { Message } from "@/lib/chat/types";
 
@@ -11,6 +13,12 @@ interface MessageBubbleProps {
   /** True while any turn is in flight — disables live choice buttons so a
    *  double-click can't submit twice. */
   disableChoices?: boolean;
+  /** True for the newest message: only its follow-up suggestions are live. */
+  isLatest?: boolean;
+  /** Send a follow-up suggestion as the next message. */
+  onSuggestion?: (text: string) => void;
+  /** Open an order card in the host app. */
+  onOpenOrder?: (orderUuid: string) => void;
 }
 
 /** A single chat turn. User messages are right-aligned bubbles; assistant
@@ -21,7 +29,14 @@ interface MessageBubbleProps {
  *  call above the whole reply. That is what lets "I'll escalate this" ->
  *  [escalating…] -> "Done" read as one sequence instead of the agent
  *  seemingly talking to itself. */
-export function MessageBubble({ message, onChoice, disableChoices }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  onChoice,
+  disableChoices,
+  isLatest = false,
+  onSuggestion,
+  onOpenOrder,
+}: MessageBubbleProps) {
   const isUser = message.role === "user";
 
   if (isUser) {
@@ -43,7 +58,7 @@ export function MessageBubble({ message, onChoice, disableChoices }: MessageBubb
             ) : part.type === "text" ? (
               <div
                 key={i}
-                className="rounded-2xl bg-user-bubble px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap text-user-bubble-foreground shadow-md shadow-black/5 ring-1 ring-border"
+                className="rounded-2xl bg-user-bubble px-4 py-2 text-[length:var(--chat-text)] leading-[var(--chat-leading)] break-words whitespace-pre-wrap text-user-bubble-foreground shadow-md shadow-black/5 ring-1 ring-border"
               >
                 {part.text}
               </div>
@@ -85,6 +100,21 @@ export function MessageBubble({ message, onChoice, disableChoices }: MessageBubb
                   resolvedOptionId={part.resolvedOptionId}
                   resolved={part.resolved}
                   onSelect={onChoice}
+                  disabled={disableChoices}
+                />
+              );
+            }
+            if (part.type === "orders") {
+              return <OrderCards key={i} orders={part.orders} onOpen={onOpenOrder} />;
+            }
+            if (part.type === "suggestions") {
+              // Stale once the conversation moved on, and pointless mid-stream.
+              if (!isLatest || message.streaming || !onSuggestion) return null;
+              return (
+                <SuggestionChips
+                  key={i}
+                  options={part.options}
+                  onSelect={onSuggestion}
                   disabled={disableChoices}
                 />
               );

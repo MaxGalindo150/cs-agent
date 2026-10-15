@@ -6,6 +6,8 @@ import type { NextConfig } from "next";
 const embedFrameAncestors = process.env.EMBED_FRAME_ANCESTORS?.trim() || "";
 
 const nextConfig: NextConfig = {
+  // The dev-mode badge sits inside the embedded widget, over its send button.
+  devIndicators: false,
   async headers() {
     return [
       {

@@ -27,6 +27,7 @@ import type {
   ConversationSummary,
   Message,
   MessagePart,
+  OrderCard,
   ToolEvent,
 } from "@/lib/chat/types";
 import { authedFetch, type ChatAuth } from "@/lib/chat/auth";
@@ -69,6 +70,9 @@ export interface StreamChatOptions {
    *  render buttons and resume with `choiceId` (or free text) rather than
    *  treating the turn as finished. */
   onChoice?: (prompt: string, options: ChoiceOption[]) => void;
+  /** Called with something a tool drew for the user (order cards,
+   *  follow-up suggestions), already validated into a message part. */
+  onDisplay?: (part: MessagePart) => void;
   /** Called when the agent hit a budget guard (max turns / tool calls). */
   onLimitReached?: (detail: unknown) => void;
   /** Called when `done` carries `needs_human: true` — the reply is a
@@ -96,6 +100,7 @@ export async function streamChat({
   onToolStart,
   onTool,
   onChoice,
+  onDisplay,
   onLimitReached,
   onNeedsHuman,
   signal,
@@ -185,6 +190,11 @@ export async function streamChat({
           renderedChoice = true;
         }
         return false; // not terminal — the server still emits `done` right after
+      }
+      case "display": {
+        const part = partFromDisplay(payload);
+        if (part) onDisplay?.(part);
+        return false;
       }
       case "limit_reached": {
         onLimitReached?.(payload);
@@ -321,6 +331,9 @@ function partsFromSegments(segments: unknown, fallbackContent: string): MessageP
           resolved,
         });
       }
+    } else {
+      const part = partFromDisplay(seg);
+      if (part) parts.push(part);
     }
   }
   return parts.length > 0 ? parts : fallback;
@@ -343,7 +356,12 @@ function stepsFromCalls(calls: unknown[]): ActivityStep[] {
     if (!raw || typeof raw !== "object") return;
     const call = raw as Record<string, unknown>;
     const tool = typeof call.tool === "string" ? call.tool : undefined;
-    const label = typeof call.label === "string" ? call.label : (tool ?? "Tool call");
+    const label =
+      typeof call.done_label === "string" && call.done_label
+        ? call.done_label
+        : typeof call.label === "string"
+          ? call.label
+          : (tool ?? "Tool call");
     steps.push({ id: `${tool ?? "tool"}-${i}`, kind: "tool", tool, label, status: "done" });
   });
   return steps;
@@ -365,4 +383,40 @@ function parseSseEvent(raw: string): { event: string; data: string } {
   }
 
   return { event, data: dataLines.join("\n") };
+}
+
+/** A tool's `display` (live event or persisted segment) as a message part,
+ *  or null when it isn't one this client draws. Untrusted wire data: fields
+ *  are checked, not cast. */
+export function partFromDisplay(raw: unknown): MessagePart | null {
+  if (!raw || typeof raw !== "object") return null;
+  const display = raw as Record<string, unknown>;
+  if (display.type === "orders" && Array.isArray(display.orders)) {
+    const orders = display.orders.flatMap((entry): OrderCard[] => {
+      if (!entry || typeof entry !== "object") return [];
+      const o = entry as Record<string, unknown>;
+      const orderNumber = o.order_number;
+      if (typeof orderNumber !== "number" && typeof orderNumber !== "string") return [];
+      const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+      return [
+        {
+          orderUuid: str(o.order_uuid),
+          orderNumber,
+          createdAt: str(o.created_at),
+          amount: typeof o.amount === "number" ? o.amount : undefined,
+          status: str(o.status),
+          store: str(o.store),
+          channel: str(o.channel),
+        },
+      ];
+    });
+    return orders.length > 0 ? { type: "orders", orders } : null;
+  }
+  if (display.type === "suggestions" && Array.isArray(display.options)) {
+    const options = display.options.filter(
+      (o): o is string => typeof o === "string" && o.trim().length > 0,
+    );
+    return options.length > 0 ? { type: "suggestions", options } : null;
+  }
+  return null;
 }

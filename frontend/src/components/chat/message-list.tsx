@@ -15,6 +15,8 @@ interface MessageListProps {
   onChoice?: (optionId: string) => void;
   /** True while any turn is in flight — disables live choice buttons. */
   disableChoices?: boolean;
+  /** Open an order card in the host app. */
+  onOpenOrder?: (orderUuid: string) => void;
 }
 
 /** Scrollable list of messages. Auto-scrolls to the bottom as content grows. */
@@ -24,6 +26,7 @@ export function MessageList({
   onSuggestion,
   onChoice,
   disableChoices,
+  onOpenOrder,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -50,13 +53,16 @@ export function MessageList({
   }
 
   return (
-    <div className="flex flex-col gap-8">
-      {messages.map((message) => (
+    <div className="flex flex-col gap-[calc(var(--chat-block-gap)*2)]">
+      {messages.map((message, i) => (
         <MessageBubble
           key={message.id}
           message={message}
           onChoice={onChoice}
           disableChoices={disableChoices}
+          isLatest={i === messages.length - 1}
+          onSuggestion={onSuggestion}
+          onOpenOrder={onOpenOrder}
         />
       ))}
       <div ref={bottomRef} />

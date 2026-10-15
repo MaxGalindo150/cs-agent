@@ -39,7 +39,7 @@ interface Session {
 
 /** The host origin to trust, or null when the host didn't opt in to sharing
  *  its identity (or isn't allowlisted — then the widget stays anonymous). */
-function trustedHostOrigin(search: string): string | null {
+export function trustedHostOrigin(search: string): string | null {
   const params = new URLSearchParams(search);
   const host = params.get("host");
   if (params.get("auth") !== "1" || !host) return null;

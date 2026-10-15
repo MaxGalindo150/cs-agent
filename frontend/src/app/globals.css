@@ -14,6 +14,8 @@
   --color-foreground: var(--foreground);
   --color-user-bubble: var(--user-bubble);
   --color-user-bubble-foreground: var(--user-bubble-foreground);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-geist-sans);
@@ -53,6 +55,25 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Chat body text. The floating widget is narrow, so .chat-compact (set by
+   <Chat variant="widget">) tightens size, line height and block spacing. */
+:root {
+  --chat-text: 15px;
+  --chat-leading: 1.75rem;
+  --chat-block-gap: 1rem;
+}
+/* Cheo's avatar. The demo page's dark theme uses its primary; the Cashea
+   theme overrides it with the brand yellow. */
+:root {
+  --brand: #fafafa;
+  --brand-foreground: #18181b;
+}
+.chat-compact {
+  --chat-text: 14px;
+  --chat-leading: 1.4rem;
+  --chat-block-gap: 0.625rem;
 }
 
 /* Light palette kept for completeness; the app runs dark-only (see layout). */
@@ -156,6 +177,8 @@
   --radius: 0.75rem; /* radius-m */
   --user-bubble: #fff799; /* yellow-cashea-300 */
   --user-bubble-foreground: #181919;
+  --brand: #ffe600; /* yellow-cashea-500 — Cheo's avatar */
+  --brand-foreground: #181919;
   --shimmer-base: #94979e; /* gray-500 */
   --shimmer-highlight: #d6d7d9; /* gray-300 */
 }

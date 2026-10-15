@@ -9,14 +9,19 @@ import { MessageList } from "@/components/chat/message-list";
 import { useChat } from "@/hooks/use-chat";
 import { useConversations } from "@/hooks/use-conversations";
 import { deleteConversation } from "@/lib/chat/api";
+import { cn } from "@/lib/utils";
 import type { ChatAuth } from "@/lib/chat/auth";
 
 /** The words that change with who the chat is for. */
 export interface ChatCopy {
   title: string;
+  /** Under the title in the header, e.g. "Soporte Cashea". */
+  headerSubtitle?: string;
   greeting: string;
   subtitle: string;
   suggestions: string[];
+  /** The composer's placeholder. */
+  placeholder?: string;
 }
 
 /** Who the chat is talking as. Supplied by the surface hosting it: the demo
@@ -57,6 +62,13 @@ interface ChatProps {
   storageKey?: string;
   copy?: ChatCopy;
   identity?: ChatIdentity;
+  /** Show who the chat is talking as in the header (the demo's identity
+   *  harness). The embed turns it off: the host's user knows who they are. */
+  showIdentity?: boolean;
+  /** Offer image attachments in the composer. */
+  allowAttachments?: boolean;
+  /** Open an order card in the host app; cards aren't clickable without it. */
+  onOpenOrder?: (orderUuid: string) => void;
 }
 
 /** Top-level chat screen: sidebar, header, scrollable transcript, and composer. */
@@ -65,6 +77,9 @@ export function Chat({
   storageKey,
   copy = DEFAULT_COPY,
   identity = ANONYMOUS,
+  showIdentity = true,
+  allowAttachments = true,
+  onOpenOrder,
 }: ChatProps) {
   const isWidget = variant === "widget";
   const { auth } = identity;
@@ -101,7 +116,7 @@ export function Chat({
   );
 
   return (
-    <div className="flex h-full bg-background text-foreground">
+    <div className={cn("flex h-full bg-background text-foreground", isWidget && "chat-compact")}>
       {!isWidget && (
         <ConversationSidebar
           conversations={conversations}
@@ -115,26 +130,39 @@ export function Chat({
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <ChatHeader
           title={copy.title}
+          subtitle={copy.headerSubtitle}
           onNewChat={reset}
           alwaysShowNewChat={isWidget}
-          identityLabel={identity.label}
+          identityLabel={showIdentity ? identity.label : undefined}
         />
 
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 py-6">
+          <div
+            className={cn(
+              "mx-auto flex h-full w-full max-w-3xl flex-col px-4",
+              isWidget ? "py-4" : "py-6",
+            )}
+          >
             <MessageList
               messages={messages}
               copy={copy}
               onSuggestion={send}
               onChoice={sendChoice}
               disableChoices={isStreaming}
+              onOpenOrder={onOpenOrder}
             />
           </div>
         </div>
 
         <div className="shrink-0">
-          <div className="mx-auto w-full max-w-3xl px-4 pb-6">
-            <ChatInput isStreaming={isStreaming} onSend={send} onStop={stop} />
+          <div className={cn("mx-auto w-full max-w-3xl px-4", isWidget ? "pb-4" : "pb-6")}>
+            <ChatInput
+              isStreaming={isStreaming}
+              onSend={send}
+              onStop={stop}
+              placeholder={copy.placeholder}
+              allowAttachments={allowAttachments}
+            />
           </div>
         </div>
       </div>

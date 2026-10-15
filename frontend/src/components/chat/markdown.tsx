@@ -85,7 +85,7 @@ function CodeBlock({
 const components: Components = {
   p({ children }) {
     return (
-      <p className="my-4 text-[15px] leading-7 text-foreground first:mt-0 last:mb-0">
+      <p className="my-[var(--chat-block-gap)] text-[length:var(--chat-text)] leading-[var(--chat-leading)] text-foreground first:mt-0 last:mb-0">
         {children}
       </p>
     );
@@ -120,14 +120,14 @@ const components: Components = {
   },
   ul({ children }) {
     return (
-      <ul className="my-4 list-disc space-y-1.5 pl-6 text-[15px] leading-7 text-foreground marker:text-muted-foreground">
+      <ul className="my-[var(--chat-block-gap)] list-disc space-y-1 pl-5 text-[length:var(--chat-text)] leading-[var(--chat-leading)] text-foreground marker:text-muted-foreground">
         {children}
       </ul>
     );
   },
   ol({ children }) {
     return (
-      <ol className="my-4 list-decimal space-y-1.5 pl-6 text-[15px] leading-7 text-foreground marker:text-muted-foreground">
+      <ol className="my-[var(--chat-block-gap)] list-decimal space-y-1 pl-5 text-[length:var(--chat-text)] leading-[var(--chat-leading)] text-foreground marker:text-muted-foreground">
         {children}
       </ol>
     );

@@ -110,7 +110,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
    *  in completion order, not call order, so matching by name (rather than
    *  by position) is what keeps a batch of two `get_order` calls from
    *  marking the same row done twice. */
-  const finishStep = useCallback((id: string, tool: string) => {
+  const finishStep = useCallback((id: string, tool: string, doneLabel?: string) => {
     setMessages((prev) =>
       prev.map((m) => {
         if (m.id !== id) return m;
@@ -124,12 +124,19 @@ export function useChat(options: UseChatOptions = {}): UseChat {
               steps: part.steps.map((s) => {
                 if (closed || s.tool !== tool || s.status !== "running") return s;
                 closed = true;
-                return { ...s, status: "done" as const };
+                return { ...s, status: "done" as const, label: doneLabel ?? s.label };
               }),
             };
           }),
         };
       }),
+    );
+  }, []);
+
+  /** Append what a tool drew (order cards, suggestions) as its own part. */
+  const addDisplay = useCallback((id: string, part: MessagePart) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, parts: [...m.parts, part] } : m)),
     );
   }, []);
 
@@ -264,7 +271,9 @@ export function useChat(options: UseChatOptions = {}): UseChat {
             label,
             status: "running",
           }),
-        onTool: (event) => finishStep(assistantId, event.tool),
+        onTool: (event) =>
+          finishStep(assistantId, event.tool, event.done_label ?? undefined),
+        onDisplay: (part) => addDisplay(assistantId, part),
         onChoice: (prompt, options) => addChoice(assistantId, prompt, options),
         onDelta: (delta) => appendDelta(assistantId, delta),
         onNeedsHuman: () => patch(assistantId, { needsHuman: true }),
@@ -293,6 +302,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       addStep,
       finishStep,
       addChoice,
+      addDisplay,
       resolveChoice,
       appendDelta,
       setConversation,
@@ -346,7 +356,9 @@ export function useChat(options: UseChatOptions = {}): UseChat {
             label,
             status: "running",
           }),
-        onTool: (event) => finishStep(assistantId, event.tool),
+        onTool: (event) =>
+          finishStep(assistantId, event.tool, event.done_label ?? undefined),
+        onDisplay: (part) => addDisplay(assistantId, part),
         onChoice: (prompt, options) => addChoice(assistantId, prompt, options),
         onDelta: (delta) => appendDelta(assistantId, delta),
         onNeedsHuman: () => patch(assistantId, { needsHuman: true }),
@@ -374,6 +386,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
       addStep,
       finishStep,
       addChoice,
+      addDisplay,
       resolveChoice,
       appendDelta,
       setConversation,

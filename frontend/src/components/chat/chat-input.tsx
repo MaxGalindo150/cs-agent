@@ -18,6 +18,9 @@ interface ChatInputProps {
   isStreaming: boolean;
   onSend: (text: string, images?: AttachedImage[]) => void;
   onStop: () => void;
+  placeholder?: string;
+  /** Offer the attach-images button (pasting images is off too without it). */
+  allowAttachments?: boolean;
 }
 
 // Mirrors agent-service's ImageInput validation (service/api/v1/chat.py) —
@@ -52,7 +55,13 @@ function readAsBase64(file: File): Promise<string> {
  *  send/stop button. Enter sends, Shift+Enter inserts a newline. Images can
  *  be attached via the clip button or pasted directly (Ctrl+V) into the
  *  textarea — both funnel through the same validate-then-read pipeline. */
-export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
+export function ChatInput({
+  isStreaming,
+  onSend,
+  onStop,
+  placeholder = "Escribe tu mensaje…",
+  allowAttachments = true,
+}: ChatInputProps) {
   const [value, setValue] = useState("");
   const [images, setImages] = useState<AttachedImage[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +123,7 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
   }
 
   function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!allowAttachments) return;
     const files = Array.from(e.clipboardData.items)
       .filter((item) => item.type.startsWith("image/"))
       .map((item) => item.getAsFile())
@@ -177,23 +187,25 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
           onChange={handleFileInputChange}
           className="hidden"
         />
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          className="rounded-lg"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isStreaming || images.length >= MAX_IMAGES_PER_TURN}
-          aria-label="Adjuntar imágenes"
-        >
-          <Paperclip />
-        </Button>
+        {allowAttachments && (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="rounded-lg"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isStreaming || images.length >= MAX_IMAGES_PER_TURN}
+            aria-label="Adjuntar imágenes"
+          >
+            <Paperclip />
+          </Button>
+        )}
         <Textarea
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Escribe tu mensaje…"
+          placeholder={placeholder}
           rows={1}
           className="max-h-44 min-h-9 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-foreground shadow-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
         />
@@ -212,7 +224,7 @@ export function ChatInput({ isStreaming, onSend, onStop }: ChatInputProps) {
           <Button
             type="button"
             size="icon"
-            className="rounded-lg"
+            className="rounded-full transition-all duration-150 disabled:bg-secondary disabled:text-muted-foreground disabled:opacity-100"
             onClick={submit}
             disabled={!canSend}
             aria-label="Enviar mensaje"

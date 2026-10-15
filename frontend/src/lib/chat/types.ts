@@ -29,7 +29,24 @@ export type MessagePart =
        *  Distinguishes "answered, no option to highlight" from "still
        *  pending" without treating an empty string as a fake option id. */
       resolved?: boolean;
-    };
+    }
+  /** Orders a tool returned, drawn as cards (agent-service's
+   *  `merchant/orders.py::order_cards`). */
+  | { type: "orders"; orders: OrderCard[] }
+  /** Follow-ups to tap (`suggest_replies`). Only live on the latest reply. */
+  | { type: "suggestions"; options: string[] };
+
+/** One order card. Every field comes from the tool's own output. */
+export interface OrderCard {
+  orderUuid?: string;
+  orderNumber: number | string;
+  createdAt?: string;
+  amount?: number;
+  /** The portal's short status name: "Abierta", "Pagada", "Cancelada"… */
+  status?: string;
+  store?: string;
+  channel?: string;
+}
 
 /** One clickable option in a `present_choice` prompt (agent-service's
  *  `agent/tools/implementations/present_choice.py`). */
@@ -100,4 +117,7 @@ export interface ToolEvent {
   args: Record<string, unknown>;
   /** Truncated server-side to 500 chars — a preview, not the full result. */
   output: string;
+  /** Past-tense line for the finished step ("Consulté tus órdenes"), when
+   *  the tool declares one. */
+  done_label?: string | null;
 }
