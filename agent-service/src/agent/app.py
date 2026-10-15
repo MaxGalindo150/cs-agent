@@ -464,7 +464,7 @@ class Agent:
                     persisted_message,
                 )
                 meta["tool_use_id"] = result.suspended["tool_use_id"]
-                await session.add_exchange(
+                result.message_id = await session.add_exchange(
                     persisted_message,
                     result.reply,
                     tool_calls=result.tool_calls,
@@ -475,7 +475,7 @@ class Agent:
                 self._tracer.end_turn(result.reply, result.iterations)
                 return result
 
-            await session.add_exchange(
+            result.message_id = await session.add_exchange(
                 persisted_message,
                 result.reply,
                 tool_calls=result.tool_calls,
@@ -675,7 +675,7 @@ class Agent:
                 logged_user_text,
             )
             meta["tool_use_id"] = result.suspended["tool_use_id"]
-            await session.add_exchange(
+            result.message_id = await session.add_exchange(
                 logged_user_text,
                 result.reply,
                 tool_calls=result.tool_calls,
@@ -693,7 +693,7 @@ class Agent:
             self._tracer.end_turn(result.reply, result.iterations)
             return result
 
-        await session.add_exchange(
+        result.message_id = await session.add_exchange(
             logged_user_text,
             result.reply,
             tool_calls=result.tool_calls,

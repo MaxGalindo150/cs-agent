@@ -18,6 +18,7 @@ End-loop guardials (the orange box's exit conditions):
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -62,6 +63,9 @@ class LoopResult:
     string-matching the text. Not set when the *model* calls
     ``escalate_to_human`` mid-turn and keeps answering — that case already
     shows up in ``segments``/``tool_calls``."""
+    message_id: uuid.UUID | None = None
+    """The logged assistant message's id — set by ``Agent`` once the turn is
+    persisted, so a client can attach feedback to it."""
     suspended: dict[str, Any] | None = None
     """Set when this turn stopped on a suspending tool call (``Tool.suspends``)
     instead of a natural end — everything ``Agent.respond()`` needs to hand to

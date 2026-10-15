@@ -177,6 +177,30 @@ async def test_no_tool_turn_still_saves_meta(database: Database) -> None:
     assert meta["tools"] == []
 
 
+async def test_a_turn_reports_the_id_of_the_reply_it_logged(
+    database: Database,
+) -> None:
+    """The id a client attaches feedback to (the SSE `done` event's
+    message_id) must be the logged assistant row."""
+    client = ScriptedClient(
+        [
+            response(
+                [text_block('{"retrieve": false, "query": "", "reason": "greeting"}')]
+            ),
+            response([text_block("¡Hola!")]),
+        ]
+    )
+    agent = make_agent(database, client)
+    session_id = await _new_session(database)
+
+    result = await agent.respond(session_id, "hola")
+
+    async with database.session() as s:
+        messages = await SessionRepository(s).list_messages(session_id)
+    assert result.message_id == messages[-1].id
+    assert messages[-1].role == "assistant"
+
+
 async def test_start_session_persists_the_resolved_principals_user_id(
     database: Database,
 ) -> None:

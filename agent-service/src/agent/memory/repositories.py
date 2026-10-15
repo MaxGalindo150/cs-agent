@@ -22,9 +22,16 @@ from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent.memory.models import ChatMessage, ChatSession, Episode, Fact
+from agent.memory.models import (
+    ChatMessage,
+    ChatSession,
+    Episode,
+    Fact,
+    MessageFeedback,
+)
 
 # The dictionary must match the one in the generated tsvector columns, or the
 # query's lexemes won't line up with the indexed ones.
@@ -472,3 +479,60 @@ class EpisodeRepository:
             )
         )
         return cast(CursorResult[Any], result).rowcount > 0
+
+
+class FeedbackRepository:
+    """Thumbs up/down on assistant replies. Callers check the session belongs
+    to the user first (service/core/session_access.py); this checks the
+    message belongs to the session and is a reply."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+
+    async def rate(
+        self,
+        session_id: uuid.UUID,
+        message_id: uuid.UUID,
+        user_id: str | None,
+        rating: int,
+        comment: str | None,
+    ) -> bool:
+        """Set (or replace) the rating. False when the message isn't an
+        assistant reply of this session."""
+        is_reply = await self._db.scalar(
+            select(ChatMessage.id).where(
+                ChatMessage.id == message_id,
+                ChatMessage.session_id == session_id,
+                ChatMessage.role == "assistant",
+            )
+        )
+        if is_reply is None:
+            return False
+        values = {"rating": rating, "comment": comment, "user_id": user_id}
+        await self._db.execute(
+            insert(MessageFeedback)
+            .values(message_id=message_id, session_id=session_id, **values)
+            .on_conflict_do_update(
+                index_elements=[MessageFeedback.message_id],
+                set_={**values, "updated_at": func.now()},
+            )
+        )
+        return True
+
+    async def clear(self, session_id: uuid.UUID, message_id: uuid.UUID) -> bool:
+        result = await self._db.execute(
+            delete(MessageFeedback).where(
+                MessageFeedback.message_id == message_id,
+                MessageFeedback.session_id == session_id,
+            )
+        )
+        return cast(CursorResult[Any], result).rowcount > 0
+
+    async def ratings_for_session(self, session_id: uuid.UUID) -> dict[uuid.UUID, int]:
+        """message_id → rating, for showing a reloaded transcript's votes."""
+        rows = await self._db.execute(
+            select(MessageFeedback.message_id, MessageFeedback.rating).where(
+                MessageFeedback.session_id == session_id
+            )
+        )
+        return {message_id: rating for message_id, rating in rows.all()}

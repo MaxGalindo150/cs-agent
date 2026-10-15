@@ -149,7 +149,16 @@ async def chat_stream(
                 host_credential=host_credential,
             )
             queue.put_nowait(
-                ("done", {"reply": result.reply, "needs_human": result.needs_human})
+                (
+                    "done",
+                    {
+                        "reply": result.reply,
+                        "needs_human": result.needs_human,
+                        # What a client attaches feedback to; null when the
+                        # turn wasn't logged as a normal reply.
+                        "message_id": result.message_id,
+                    },
+                )
             )
         except anthropic.APIError as exc:
             # Mid-stream: headers are already sent, so surface the failure as an

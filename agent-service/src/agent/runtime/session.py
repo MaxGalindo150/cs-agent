@@ -124,13 +124,15 @@ class Session:
         tool_calls: list[LoopEvent] | None = None,
         source: str = "api",
         meta: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> uuid.UUID | None:
         """Record the turn in history (working memory) and, if memory is wired,
         in the chat log (so consolidation can distil it later).
 
         Tool activity is folded into the assistant's history entry as a compact
         [tools used: ...] line. Without it, the model forgets it already acted
         and happily re-runs the same tool with the same parameters next turn.
+
+        Returns the logged assistant message's id, or None without memory.
 
         Async because ``log_chat`` writes to Postgres. ``source`` defaults to
         "api" — the transport should pass the real channel (whatsapp/webchat).
@@ -143,14 +145,16 @@ class Session:
             record = f"{reply}\n[tools used: {summary}]"
         self.history.append({"role": "user", "content": user_message})
         self.history.append({"role": "assistant", "content": record})
-        if self.memory is not None:
-            await self.memory.log_chat(
-                user_message,
-                record,
-                session_id=self.session_id,
-                source=source,
-                meta=meta,
-            )
+        if self.memory is None:
+            return None
+        message_id: uuid.UUID = await self.memory.log_chat(
+            user_message,
+            record,
+            session_id=self.session_id,
+            source=source,
+            meta=meta,
+        )
+        return message_id
 
     # ---- session lifecycle (the "New chat" / history feature)
     # A session is just a tag on chat_log rows. Starting a new one clears working

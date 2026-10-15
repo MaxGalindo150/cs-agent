@@ -149,8 +149,9 @@ class Memory:
         session_id: uuid.UUID,
         source: str | None = None,
         meta: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> uuid.UUID:
         """Append one full turn (user + assistant) in a single short transaction.
+        Returns the assistant message's id (what feedback is attached to).
 
         ``source`` (the input channel) tags both rows, as in Waku. Per-turn
         telemetry (gate decision, latency, tools) rides on the assistant row's
@@ -159,9 +160,10 @@ class Memory:
         async with self._db.session() as session:
             repo = SessionRepository(session)
             await repo.append_message(session_id, "user", user_message, source=source)
-            await repo.append_message(
+            assistant = await repo.append_message(
                 session_id, "assistant", reply, source=source, meta=meta
             )
+            return assistant.id
 
     async def session_history(self, session_id: uuid.UUID) -> list[tuple[str, str]]:
         """The (user, assistant) exchanges of a past session, in order — used to

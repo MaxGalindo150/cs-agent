@@ -21,14 +21,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent.identity import Principal
 from agent.memory.db import Database
-from agent.memory.repositories import SessionRepository
+from agent.memory.repositories import FeedbackRepository, SessionRepository
 from service.core.agent import get_database
 from service.core.identity import get_principal
 from service.core.session_access import SessionAccess
@@ -65,6 +65,9 @@ class MessageOut(BaseModel):
     # reload — absent on user messages and on turns logged before this existed.
     meta: dict[str, Any] | None
     created_at: datetime
+    # The caller's own vote on this reply, if any — so a reloaded transcript
+    # shows the thumb they picked.
+    feedback: Literal["up", "down"] | None = None
 
 
 @router.get("/sessions", response_model=list[SessionSummary])
@@ -98,7 +101,13 @@ async def list_session_messages(
     await SessionAccess(lambda: db).require(session_id, principal)
     async with db.session() as session:
         rows = await SessionRepository(session).list_messages(session_id, limit)
-        return [MessageOut.model_validate(row) for row in rows]
+        ratings = await FeedbackRepository(session).ratings_for_session(session_id)
+    messages = [MessageOut.model_validate(row) for row in rows]
+    for message in messages:
+        rating = ratings.get(message.id)
+        if rating is not None:
+            message.feedback = "up" if rating > 0 else "down"
+    return messages
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -113,4 +122,54 @@ async def delete_session(
         deleted = await SessionRepository(session).delete_session(session_id)
     if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class FeedbackIn(BaseModel):
+    rating: Literal["up", "down"]
+    comment: str | None = Field(default=None, max_length=500)
+
+
+@router.put(
+    "/sessions/{session_id}/messages/{message_id}/feedback",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def rate_message(
+    session_id: uuid.UUID,
+    message_id: uuid.UUID,
+    body: FeedbackIn,
+    db: Database = Depends(get_database),
+    principal: Principal | None = Depends(get_principal),
+) -> Response:
+    """Thumbs up/down on one of the caller's assistant replies; rating again
+    replaces the vote. 404 when the session isn't the caller's or the
+    message isn't a reply in it."""
+    await SessionAccess(lambda: db).require(session_id, principal)
+    async with db.session() as session:
+        rated = await FeedbackRepository(session).rate(
+            session_id,
+            message_id,
+            user_id=principal.user_id if principal else None,
+            rating=1 if body.rating == "up" else -1,
+            comment=(body.comment or "").strip() or None,
+        )
+    if not rated:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/sessions/{session_id}/messages/{message_id}/feedback",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def clear_message_rating(
+    session_id: uuid.UUID,
+    message_id: uuid.UUID,
+    db: Database = Depends(get_database),
+    principal: Principal | None = Depends(get_principal),
+) -> Response:
+    """Withdraw the caller's vote on a reply. 204 even if there was none."""
+    await SessionAccess(lambda: db).require(session_id, principal)
+    async with db.session() as session:
+        await FeedbackRepository(session).clear(session_id, message_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

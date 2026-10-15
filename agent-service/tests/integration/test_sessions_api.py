@@ -201,3 +201,109 @@ async def test_cannot_delete_someone_elses_session(
     assert resp.status_code == 404
     async with database.session() as s:
         assert await SessionRepository(s).get_session(theirs) is not None
+
+
+# ---- feedback on replies ----------------------------------------------------
+
+
+async def _thread(
+    database: Database, user_id: str | None
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """A session with one user message and one reply: (session, user msg, reply)."""
+    async with database.session() as s:
+        repo = SessionRepository(s)
+        session_id = (await repo.create_session(title="hilo", user_id=user_id)).id
+        question = await repo.append_message(session_id, "user", "¿mis órdenes?")
+        reply = await repo.append_message(session_id, "assistant", "aquí están")
+    return session_id, question.id, reply.id
+
+
+async def test_a_reply_can_be_rated_rerated_and_cleared(
+    api: httpx.AsyncClient, database: Database
+) -> None:
+    session_id, _, reply_id = await _thread(database, "usr_a")
+    url = f"/v1/sessions/{session_id}/messages/{reply_id}/feedback"
+
+    first = await api.put(
+        url, json={"rating": "down", "comment": "no era eso"}, headers=_AS_A
+    )
+    again = await api.put(url, json={"rating": "up"}, headers=_AS_A)
+    listed = await api.get(f"/v1/sessions/{session_id}/messages", headers=_AS_A)
+
+    assert (first.status_code, again.status_code) == (204, 204)
+    assert [m["feedback"] for m in listed.json()] == [None, "up"]
+    async with database.session() as s:
+        row = (
+            await s.execute(
+                sa.text(
+                    "select rating, comment, user_id from agent.message_feedback "
+                    "where message_id = :id"
+                ),
+                {"id": reply_id},
+            )
+        ).one()
+    # Re-rating replaced the vote, comment included.
+    assert tuple(row) == (1, None, "usr_a")
+
+    cleared = await api.delete(url, headers=_AS_A)
+    relisted = await api.get(f"/v1/sessions/{session_id}/messages", headers=_AS_A)
+
+    assert cleared.status_code == 204
+    assert [m["feedback"] for m in relisted.json()] == [None, None]
+
+
+async def test_only_the_session_owner_can_rate(
+    api: httpx.AsyncClient, database: Database
+) -> None:
+    session_id, _, reply_id = await _thread(database, "usr_a")
+
+    resp = await api.put(
+        f"/v1/sessions/{session_id}/messages/{reply_id}/feedback",
+        json={"rating": "up"},
+        headers=_AS_B,
+    )
+
+    assert resp.status_code == 404
+
+
+async def test_only_replies_of_that_session_can_be_rated(
+    api: httpx.AsyncClient, database: Database
+) -> None:
+    session_id, question_id, _ = await _thread(database, "usr_a")
+    _, _, other_reply_id = await _thread(database, "usr_a")
+
+    own_question = await api.put(
+        f"/v1/sessions/{session_id}/messages/{question_id}/feedback",
+        json={"rating": "up"},
+        headers=_AS_A,
+    )
+    elsewhere = await api.put(
+        f"/v1/sessions/{session_id}/messages/{other_reply_id}/feedback",
+        json={"rating": "up"},
+        headers=_AS_A,
+    )
+    bad_rating = await api.put(
+        f"/v1/sessions/{session_id}/messages/{question_id}/feedback",
+        json={"rating": "meh"},
+        headers=_AS_A,
+    )
+
+    assert (own_question.status_code, elsewhere.status_code) == (404, 404)
+    assert bad_rating.status_code == 422
+
+
+async def test_deleting_the_session_takes_its_feedback(
+    api: httpx.AsyncClient, database: Database
+) -> None:
+    session_id, _, reply_id = await _thread(database, "usr_a")
+    await api.put(
+        f"/v1/sessions/{session_id}/messages/{reply_id}/feedback",
+        json={"rating": "up"},
+        headers=_AS_A,
+    )
+
+    await api.delete(f"/v1/sessions/{session_id}", headers=_AS_A)
+
+    async with database.session() as s:
+        left = await s.scalar(sa.text("select count(*) from agent.message_feedback"))
+    assert left == 0

@@ -1,11 +1,12 @@
 """SQLAlchemy models for agent memory & sessions (ADR-0002).
 
-Four tables under the owned ``agent`` schema:
+Five tables under the owned ``agent`` schema:
 
 - ``chat_sessions`` / ``chat_messages`` — conversation persistence. The raw
   message log is what consolidation reads from.
 - ``facts``    — semantic memory (durable facts), full-text searchable.
 - ``episodes`` — episodic memory (dated, distilled), full-text searchable.
+- ``message_feedback`` — a user's thumbs up/down on an assistant reply.
 
 Full-text search uses a generated ``tsvector`` column (``spanish`` dictionary)
 with a GIN index — the database maintains it automatically, so there are no
@@ -27,6 +28,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    SmallInteger,
     String,
     Text,
     Uuid,
@@ -132,6 +134,33 @@ class ChatMessage(Base):
     )
 
     session: Mapped[ChatSession] = relationship(back_populates="messages")
+
+
+class MessageFeedback(Base):
+    """A user's rating of one assistant reply: thumbs up (1) or down (-1), with
+    an optional comment. One per message — rating again replaces it. Goes
+    away with the message (and so with the session)."""
+
+    __tablename__ = "message_feedback"
+    __table_args__ = (CheckConstraint("rating IN (-1, 1)", name="rating_valid"),)
+
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Who rated — the session owner (the route enforces it); NULL for an
+    # anonymous visitor's session.
+    user_id: Mapped[str | None] = mapped_column(String(255))
+    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Fact(Base):
