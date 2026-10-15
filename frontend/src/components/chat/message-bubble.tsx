@@ -151,11 +151,11 @@ function StreamingCursor() {
   );
 }
 
-/** Cheo thinking, shown before the first token arrives. */
+/** Cheo waiting, eyes up, before the first token arrives. */
 function TypingDots() {
   return (
     <span className="flex py-1" role="status">
-      <Cheo mood="thinking" className="h-8 w-10" />
+      <Cheo mood="attentive" className="h-8 w-10" />
       <span className="sr-only">Cheo está pensando</span>
     </span>
   );

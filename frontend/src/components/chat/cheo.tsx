@@ -2,7 +2,9 @@ import { useId } from "react";
 
 import { cn } from "@/lib/utils";
 
-export type CheoMood = "idle" | "thinking" | "happy";
+/** idle: floats and blinks · attentive: waiting on a reply, eyes up ·
+ *  working: a tool is running, little clouds orbit it · happy: ^^ */
+export type CheoMood = "idle" | "attentive" | "working" | "happy";
 
 interface CheoProps {
   mood?: CheoMood;
@@ -22,9 +24,8 @@ const LOBES: [number, number, number][] = [
   [64, 54, 24],
 ];
 
-/** Cheo, the Cashea cloud: floats and blinks when idle, looks up and
- *  breathes while thinking, squints happily when a reply lands. Animations
- *  live in globals.css (.cheo-*) and stop under prefers-reduced-motion. */
+/** Cheo, the Cashea cloud. Animations live in globals.css (.cheo-*) and
+ *  stop under prefers-reduced-motion. */
 export function Cheo({ mood = "idle", className }: CheoProps) {
   // Per-instance ids: several Cheos can be on screen at once.
   const id = useId().replace(/:/g, "");
@@ -56,10 +57,11 @@ export function Cheo({ mood = "idle", className }: CheoProps) {
         ry="3.6"
         filter={`url(#${soft})`}
       />
-      <g className="cheo-puffs" fill={`url(#${fill})`}>
-        <circle cx="102" cy="22" r="4" />
-        <circle cx="110" cy="13" r="3" />
-        <circle cx="115" cy="6" r="2.2" />
+      {/* Orbits the middle of the cloud while working: top, right, bottom. */}
+      <g className="cheo-orbit" fill={`url(#${fill})`}>
+        <circle cx="64" cy="8" r="5" />
+        <circle cx="118" cy="54" r="4" />
+        <circle cx="64" cy="100" r="3.4" />
       </g>
       <g className="cheo-body">
         {LOBES.map(([cx, cy, r]) => (

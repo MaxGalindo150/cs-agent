@@ -4,13 +4,16 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatInput } from "@/components/chat/chat-input";
+import type { CheoMood } from "@/components/chat/cheo";
 import { ConversationSidebar } from "@/components/chat/conversation-sidebar";
 import { MessageList } from "@/components/chat/message-list";
+import { isRunningTool } from "@/components/chat/tool-activity";
 import { useChat } from "@/hooks/use-chat";
 import { useConversations } from "@/hooks/use-conversations";
 import { deleteConversation } from "@/lib/chat/api";
 import { cn } from "@/lib/utils";
 import type { ChatAuth } from "@/lib/chat/auth";
+import type { Message } from "@/lib/chat/types";
 
 /** The words that change with who the chat is for. */
 export interface ChatCopy {
@@ -100,6 +103,8 @@ export function Chat({
     reset();
   }, [identity.key, reset]);
 
+  const cheoMood = moodFor(messages[messages.length - 1], isStreaming);
+
   const handleDelete = useCallback(
     (id: string) => {
       if (!window.confirm("¿Eliminar esta conversación?")) return;
@@ -135,6 +140,7 @@ export function Chat({
           alwaysShowNewChat={isWidget}
           identityLabel={showIdentity ? identity.label : undefined}
           busy={isStreaming}
+          mood={cheoMood}
         />
 
         <div className="flex-1 overflow-y-auto">
@@ -170,4 +176,14 @@ export function Chat({
       </div>
     </div>
   );
+}
+
+/** Cheo in the header: working while a tool runs, attentive until the reply
+ *  starts to show, then back to floating while it's written out. */
+function moodFor(last: Message | undefined, isStreaming: boolean): CheoMood {
+  if (!isStreaming || !last) return "idle";
+  const parts = last.parts;
+  if (parts.some((p) => p.type === "steps" && p.steps.some(isRunningTool))) return "working";
+  if (!parts.some((p) => p.type === "text" && p.text.trim())) return "attentive";
+  return "idle";
 }

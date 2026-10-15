@@ -41,7 +41,12 @@ export function ToolActivity({ steps, streaming = false }: ToolActivityProps) {
         aria-expanded={expanded}
         className="group flex items-center gap-1 rounded text-muted-foreground transition-colors duration-150 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {streaming && <Cheo mood="thinking" className="mr-1 h-5 w-6" />}
+        {streaming && (
+          <Cheo
+            mood={steps.some(isRunningTool) ? "working" : "attentive"}
+            className="mr-1 h-5 w-6"
+          />
+        )}
         <span className={cn(streaming && "text-shimmer")}>
           {summarize(steps, streaming)}
         </span>
@@ -91,6 +96,10 @@ function Row({
       <span className={running ? "text-shimmer" : "text-muted-foreground"}>{label}</span>
     </li>
   );
+}
+
+export function isRunningTool(step: ActivityStep): boolean {
+  return step.kind === "tool" && step.status === "running";
 }
 
 /** The collapsed one-liner: what was done, in the tools' own words —

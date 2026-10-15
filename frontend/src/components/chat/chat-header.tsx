@@ -1,7 +1,7 @@
 import { SquarePen } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { Cheo } from "@/components/chat/cheo";
+import { Cheo, type CheoMood } from "@/components/chat/cheo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -25,15 +25,17 @@ interface ChatHeaderProps {
    * sidebar to fall back on.
    */
   alwaysShowNewChat?: boolean;
-  /** A reply is on its way: the avatar thinks, then cheers when it lands. */
+  /** A reply is on its way; Cheo cheers (^^) when it lands. */
   busy?: boolean;
+  /** How Cheo looks meanwhile: attentive, working on a tool, or idle. */
+  mood?: CheoMood;
 }
 
 /** How long Cheo stays ^^ after a reply lands. */
 const HAPPY_MS = 1400;
 
-/** Top bar: Cheo as the avatar (thinking while a reply streams), the name
- *  and subtitle, and a new-chat button. */
+/** Top bar: Cheo as the avatar, the name and subtitle, and a new-chat
+ *  button. */
 export function ChatHeader({
   title,
   subtitle,
@@ -41,6 +43,7 @@ export function ChatHeader({
   identityLabel,
   alwaysShowNewChat,
   busy = false,
+  mood = "idle",
 }: ChatHeaderProps) {
   // Happy on the busy → idle edge. Adjusted during render rather than in an
   // effect (react-hooks/set-state-in-effect); the effect only times it out.
@@ -60,7 +63,7 @@ export function ChatHeader({
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
       <div className="flex min-w-0 items-center gap-3">
         <Cheo
-          mood={busy ? "thinking" : happy ? "happy" : "idle"}
+          mood={happy ? "happy" : mood}
           className="h-9 w-11 shrink-0"
         />
         <div className="flex min-w-0 flex-col leading-tight">
