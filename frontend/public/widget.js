@@ -16,7 +16,7 @@
  *     casheaChat.destroy();
  *   </script>
  *
- * Injects the launcher — Cheo, a floating yellow cloud — and, on first open,
+ * Injects the launcher — Cheo, the Cashea orb — and, on first open,
  * an iframe to <chat-host>/embed that holds the whole chat UI. Plain JS (no
  * build step) with inline styles so it runs on any host; the few keyframes
  * live in one injected <style>, scoped to the launcher's id.
@@ -48,46 +48,41 @@
   var EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
   var SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
-  // Cheo: same cloud as frontend/src/components/chat/cheo.tsx — keep the two
-  // in sync. Puffy all the way round, floating over a soft shadow.
-  var LOBES = [
-    [40, 46, 20], [64, 36, 25], [88, 48, 18], [34, 61, 15],
-    [52, 66, 17], [74, 66, 18], [93, 61, 14], [64, 54, 24],
-  ];
-  var EYES_OPEN =
-    '<ellipse class="cc-eye" cx="56" cy="56" rx="4.6" ry="7"/>' +
-    '<ellipse class="cc-eye" cx="72" cy="56" rx="4.6" ry="7"/>';
-  var EYES_HAPPY =
-    '<path class="cc-squint" d="M50 58 q6 -8 12 0"/><path class="cc-squint" d="M66 58 q6 -8 12 0"/>';
-  var CHEO =
-    '<svg class="cc-cheo" viewBox="8 4 112 96" width="76" height="68" aria-hidden="true">' +
-    '<defs><linearGradient id="cashea-cheo-fill" gradientUnits="userSpaceOnUse" x1="0" y1="12" x2="0" y2="84">' +
-    '<stop offset="0" stop-color="#fffc8a"/><stop offset="0.55" stop-color="#fdfa3d"/><stop offset="1" stop-color="#f6ec1f"/>' +
-    '</linearGradient><filter id="cashea-cheo-soft" x="-50%" y="-200%" width="200%" height="500%">' +
-    '<feGaussianBlur stdDeviation="2.4"/></filter></defs>' +
-    '<ellipse class="cc-ground" cx="64" cy="94" rx="30" ry="3.6" filter="url(#cashea-cheo-soft)"/>' +
-    '<g class="cc-body">' +
-    LOBES.map(function (l) {
-      return '<circle cx="' + l[0] + '" cy="' + l[1] + '" r="' + l[2] + '" fill="url(#cashea-cheo-fill)"/>';
-    }).join("") +
-    '<g class="cc-eyes">' + EYES_OPEN + "</g></g></svg>";
+  // Cheo, the orb: the <cheo-orb> custom element from @cashea/cheo, loaded
+  // from <chat-host>/cheo-orb.js (a copy of the package's dist/cheo-orb.js,
+  // see frontend/vendor/README.md). It follows the pointer and draws its own
+  // blink; this file only adds the aura around it while the chat is closed.
+  var ORB_SIZE = 56;
+  var CHEO = '<cheo-orb size="' + ORB_SIZE + '" follow></cheo-orb>';
 
-  // Idle float + blink, the open squash, and the happy ^^. Scoped by id so
-  // nothing leaks into the host page; all of it stops under reduced motion.
+  // Scoped by id so nothing leaks into the host page. The aura is a yellow
+  // glow behind the orb that breathes while the chat is closed, so the
+  // launcher catches the eye; it stops under reduced motion.
   var STYLE =
-    "#cashea-chat-launcher .cc-cheo{display:block;overflow:visible}" +
-    "#cashea-chat-launcher .cc-body,#cashea-chat-launcher .cc-ground,#cashea-chat-launcher .cc-eye{transform-box:fill-box}" +
-    "#cashea-chat-launcher .cc-body{transform-origin:50% 100%;animation:cc-float 3.2s ease-in-out infinite alternate}" +
-    "#cashea-chat-launcher .cc-ground{fill:rgba(24,25,25,.16);transform-origin:center;animation:cc-ground 3.2s ease-in-out infinite alternate}" +
-    "#cashea-chat-launcher .cc-eyes{transition:transform 160ms " + EASE + "}" +
-    "#cashea-chat-launcher .cc-eye{fill:#181919;transform-origin:center;animation:cc-blink 4.8s infinite}" +
-    "#cashea-chat-launcher .cc-squint{fill:none;stroke:#181919;stroke-width:3.2;stroke-linecap:round}" +
-    "#cashea-chat-launcher.cc-squash .cc-cheo{animation:cc-squash 320ms " + SPRING + "}" +
-    "@keyframes cc-float{to{transform:translateY(-4px)}}" +
-    "@keyframes cc-ground{to{transform:scale(.82);opacity:.6}}" +
-    "@keyframes cc-blink{0%,93%,100%{transform:scaleY(1)}95%{transform:scaleY(.12)}}" +
+    "#cashea-chat-launcher{display:flex;align-items:center;justify-content:center}" +
+    "#cashea-chat-launcher cheo-orb:not(:defined){display:inline-block;width:" + ORB_SIZE + "px;height:" + ORB_SIZE + "px}" +
+    "#cashea-chat-launcher cheo-orb{position:relative}" +
+    "#cashea-chat-launcher::before{content:'';position:absolute;left:50%;top:50%;width:112px;height:112px;margin:-56px 0 0 -56px;border-radius:50%;pointer-events:none;" +
+    "background:radial-gradient(circle,rgba(253,250,61,.8) 0,rgba(253,250,61,.5) 36%,rgba(253,250,61,0) 70%);" +
+    "opacity:0;transform:scale(.7);transition:opacity 240ms " + EASE + ",transform 240ms " + EASE + "}" +
+    "#cashea-chat-launcher[aria-expanded=false]::before{opacity:1;transform:none;animation:cc-aura 2.6s ease-in-out infinite alternate}" +
+    "@keyframes cc-aura{from{opacity:.65;transform:scale(.92)}to{opacity:1;transform:scale(1.08)}}" +
+    "#cashea-chat-launcher.cc-squash cheo-orb{animation:cc-squash 320ms " + SPRING + "}" +
     "@keyframes cc-squash{35%{transform:scale(1.14,.86)}70%{transform:scale(.96,1.04)}}" +
-    "@media (prefers-reduced-motion:reduce){#cashea-chat-launcher *{animation:none!important;transition:none!important}}";
+    "@media (prefers-reduced-motion:reduce){#cashea-chat-launcher *,#cashea-chat-launcher::before{animation:none!important;transition:none!important}}";
+
+  // Registers <cheo-orb> once. Until the script arrives the launcher shows an
+  // empty, same-sized slot; if it never does the launcher still opens the chat.
+  function loadOrb(baseUrl) {
+    if (window.customElements && window.customElements.get("cheo-orb")) return;
+    var orbScript = document.createElement("script");
+    orbScript.src = baseUrl + "/cheo-orb.js";
+    orbScript.async = true;
+    orbScript.onerror = function () {
+      console.error("[casheaChat] Could not load " + orbScript.src);
+    };
+    document.head.appendChild(orbScript);
+  }
 
   // Luz tokens (merchant-web): gray-1000, gray-200, shadow-xl.
   var INK = "#181919";
@@ -138,36 +133,29 @@
       border: "none",
       background: "none",
       cursor: "pointer",
-      display: "block",
+      display: "flex",
       padding: "0",
       zIndex: Z,
       transition: "transform 200ms " + SPRING,
       WebkitTapHighlightColor: "transparent",
     });
-    var eyes = launcher.querySelector(".cc-eyes");
+    var orb = launcher.querySelector("cheo-orb");
+    loadOrb(baseUrl);
 
     var style = document.createElement("style");
     style.id = "cashea-chat-style";
     style.textContent = STYLE;
     document.head.appendChild(style);
 
-    // Hover lifts Cheo a little and it looks at the pointer.
+    // Hover lifts Cheo a little and wakes its eyes (the orb follows the pointer
+    // on its own).
     launcher.addEventListener("mouseenter", function () {
       launcher.style.transform = "translateY(-2px) scale(1.04)";
+      orb.awake = true;
     });
     launcher.addEventListener("mouseleave", function () {
       launcher.style.transform = "";
-      eyes.style.transform = "";
-    });
-    launcher.addEventListener("pointermove", function (event) {
-      if (open || reducedMotion.matches) return;
-      var r = launcher.getBoundingClientRect();
-      var dx = event.clientX - (r.left + r.width / 2);
-      var dy = event.clientY - (r.top + r.height * 0.55);
-      var d = Math.hypot(dx, dy) || 1;
-      var k = Math.min(1, d / 30);
-      eyes.style.transform =
-        "translate(" + ((dx / d) * 3 * k).toFixed(2) + "px," + ((dy / d) * 2 * k).toFixed(2) + "px)";
+      orb.awake = false;
     });
 
     // Built on first open, so a host page that never opens the chat never
@@ -280,8 +268,7 @@
             });
       }
       // Open: Cheo smiles ^^ (and stays the button that closes the chat).
-      eyes.style.transform = "";
-      eyes.innerHTML = open ? EYES_HAPPY : EYES_OPEN;
+      orb.mood = open ? "happy" : "idle";
       launcher.classList.remove("cc-squash");
       void launcher.offsetWidth;
       launcher.classList.add("cc-squash");

@@ -1,0 +1,66 @@
+{
+  "name": "@cashea/cheo",
+  "version": "0.1.0",
+  "description": "Cheo, the Cashea assistant orb, as a framework-free <cheo-orb> custom element with an optional React wrapper.",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Cashea",
+  "homepage": "https://github.com/cashea/cheo-orb#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cashea/cheo-orb.git"
+  },
+  "keywords": [
+    "cashea",
+    "cheo",
+    "web-component",
+    "custom-element",
+    "mascot",
+    "react"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/cheo-orb.js",
+  "jsdelivr": "./dist/cheo-orb.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
+      }
+    },
+    "./cheo-orb.js": "./dist/cheo-orb.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

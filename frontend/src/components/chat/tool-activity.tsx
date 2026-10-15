@@ -42,7 +42,7 @@ export function ToolActivity({ steps, streaming = false }: ToolActivityProps) {
         className="group flex items-center gap-1 rounded text-muted-foreground transition-colors duration-150 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {/* Streaming here means no reply text yet: Cheo is still at work. */}
-        {streaming && <Cheo mood="working" className="mr-1.5 h-6 w-7" />}
+        {streaming && <Cheo mood="working" size={24} className="mr-1.5" />}
         <span className={cn(streaming && "text-shimmer")}>
           {summarize(steps, streaming)}
         </span>

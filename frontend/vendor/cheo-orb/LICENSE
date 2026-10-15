@@ -1,0 +1,17 @@
+Copyright © 2026 Cashea. All rights reserved.
+
+This software, and the Cheo character, name, and visual design it renders, are
+proprietary to Cashea.
+
+The package is published to the public npm registry and served from public CDNs
+so that Cashea sites and services can load it. Being publicly downloadable does
+not grant a license. No part of this software or the Cheo character may be used,
+copied, modified, merged, published, distributed, sublicensed, or sold, in whole
+or in part, without the prior written permission of Cashea.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL Cashea BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

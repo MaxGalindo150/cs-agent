@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Built third-party artifacts (see vendor/README.md).
+    "vendor/**",
+    "public/cheo-orb.js",
   ]),
 ]);
 

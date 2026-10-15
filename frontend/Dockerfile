@@ -16,6 +16,8 @@ WORKDIR /app
 
 # Copied first so the dependency layer is cached independently of the source.
 COPY package.json package-lock.json ./
+# @cashea/cheo is a file: dependency until it is published (see vendor/README.md).
+COPY vendor ./vendor
 RUN npm ci
 
 COPY . .

@@ -62,10 +62,7 @@ export function ChatHeader({
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
       <div className="flex min-w-0 items-center gap-3">
-        <Cheo
-          mood={happy ? "happy" : mood}
-          className="h-9 w-11 shrink-0"
-        />
+        <Cheo mood={happy ? "happy" : mood} size={36} className="shrink-0" />
         <div className="flex min-w-0 flex-col leading-tight">
           <span className="truncate text-sm font-semibold tracking-tight text-foreground">
             {title}

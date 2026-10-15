@@ -155,7 +155,7 @@ function StreamingCursor() {
 function TypingDots() {
   return (
     <span className="flex py-1" role="status">
-      <Cheo mood="attentive" className="h-8 w-10" />
+      <Cheo mood="attentive" size={32} />
       <span className="sr-only">Cheo está pensando</span>
     </span>
   );
