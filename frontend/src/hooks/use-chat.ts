@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { fetchMessages, streamChat } from "@/lib/chat/api";
+import { fetchMessages, rateMessage, streamChat } from "@/lib/chat/api";
 import type { ChatAuth } from "@/lib/chat/auth";
 import type {
   ActivityStep,
   AttachedImage,
   ChoiceOption,
+  Feedback,
   Message,
   MessagePart,
 } from "@/lib/chat/types";
@@ -53,6 +54,8 @@ export interface UseChat {
   reset: () => void;
   /** Load an existing conversation's transcript into the view. */
   load: (id: string) => void;
+  /** Rate a reply (by its local message id), or clear the rating with null. */
+  rate: (messageId: string, feedback: Feedback | null) => void;
 }
 
 /**
@@ -277,6 +280,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
         onChoice: (prompt, options) => addChoice(assistantId, prompt, options),
         onDelta: (delta) => appendDelta(assistantId, delta),
         onNeedsHuman: () => patch(assistantId, { needsHuman: true }),
+        onMessageId: (serverId) => patch(assistantId, { serverId }),
       })
         .then(() => patch(assistantId, { streaming: false }))
         .catch((err: unknown) => {
@@ -362,6 +366,7 @@ export function useChat(options: UseChatOptions = {}): UseChat {
         onChoice: (prompt, options) => addChoice(assistantId, prompt, options),
         onDelta: (delta) => appendDelta(assistantId, delta),
         onNeedsHuman: () => patch(assistantId, { needsHuman: true }),
+        onMessageId: (serverId) => patch(assistantId, { serverId }),
       })
         .then(() => patch(assistantId, { streaming: false }))
         .catch((err: unknown) => {
@@ -459,5 +464,20 @@ export function useChat(options: UseChatOptions = {}): UseChat {
     }
   }, [conversationId, storageKey]);
 
-  return { messages, isStreaming, conversationId, send, sendChoice, stop, reset, load };
+  const rate = useCallback(
+    (messageId: string, feedback: Feedback | null) => {
+      const conversation = conversationIdRef.current;
+      const message = messages.find((m) => m.id === messageId);
+      if (!conversation || !message?.serverId) return;
+      const previous = message.feedback;
+      // Optimistic: the thumb reacts at once, and goes back if saving fails.
+      patch(messageId, { feedback: feedback ?? undefined });
+      rateMessage(conversation, message.serverId, feedback, auth).catch(() =>
+        patch(messageId, { feedback: previous }),
+      );
+    },
+    [messages, patch, auth],
+  );
+
+  return { messages, isStreaming, conversationId, send, sendChoice, stop, reset, load, rate };
 }

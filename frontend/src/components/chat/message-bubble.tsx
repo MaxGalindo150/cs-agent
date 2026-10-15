@@ -1,9 +1,10 @@
 import { ChoicePrompt } from "@/components/chat/choice-prompt";
+import { FeedbackButtons } from "@/components/chat/feedback-buttons";
 import { Markdown } from "@/components/chat/markdown";
 import { OrderCards } from "@/components/chat/order-cards";
 import { SuggestionChips } from "@/components/chat/suggestion-chips";
 import { ToolActivity } from "@/components/chat/tool-activity";
-import type { Message } from "@/lib/chat/types";
+import type { Feedback, Message } from "@/lib/chat/types";
 
 interface MessageBubbleProps {
   message: Message;
@@ -19,6 +20,8 @@ interface MessageBubbleProps {
   onSuggestion?: (text: string) => void;
   /** Open an order card in the host app. */
   onOpenOrder?: (orderUuid: string) => void;
+  /** Rate this reply; the thumbs are hidden without it. */
+  onRate?: (messageId: string, feedback: Feedback | null) => void;
 }
 
 /** A single chat turn. User messages are right-aligned bubbles; assistant
@@ -36,6 +39,7 @@ export function MessageBubble({
   isLatest = false,
   onSuggestion,
   onOpenOrder,
+  onRate,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
@@ -127,6 +131,13 @@ export function MessageBubble({
 
       {message.error && (
         <p className="mt-1 text-xs text-destructive">{message.error}</p>
+      )}
+
+      {onRate && message.serverId && !message.streaming && !message.error && (
+        <FeedbackButtons
+          value={message.feedback}
+          onChange={(feedback) => onRate(message.id, feedback)}
+        />
       )}
     </div>
   );

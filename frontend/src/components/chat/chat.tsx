@@ -84,7 +84,7 @@ export function Chat({
   const isWidget = variant === "widget";
   const { auth } = identity;
   const { conversations, refresh } = useConversations(auth);
-  const { messages, isStreaming, conversationId, send, sendChoice, stop, reset, load } =
+  const { messages, isStreaming, conversationId, send, sendChoice, stop, reset, load, rate } =
     useChat({ onConversationUpdate: refresh, storageKey, auth });
 
   // A different person taking over starts a fresh conversation — the old
@@ -150,6 +150,7 @@ export function Chat({
               onChoice={sendChoice}
               disableChoices={isStreaming}
               onOpenOrder={onOpenOrder}
+              onRate={rate}
             />
           </div>
         </div>

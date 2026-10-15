@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 import { MessageBubble } from "@/components/chat/message-bubble";
 import type { ChatCopy } from "@/components/chat/chat";
-import type { Message } from "@/lib/chat/types";
+import type { Feedback, Message } from "@/lib/chat/types";
 
 interface MessageListProps {
   messages: Message[];
@@ -17,6 +17,8 @@ interface MessageListProps {
   disableChoices?: boolean;
   /** Open an order card in the host app. */
   onOpenOrder?: (orderUuid: string) => void;
+  /** Rate a reply (thumbs up/down). */
+  onRate?: (messageId: string, feedback: Feedback | null) => void;
 }
 
 /** Scrollable list of messages. Auto-scrolls to the bottom as content grows. */
@@ -27,6 +29,7 @@ export function MessageList({
   onChoice,
   disableChoices,
   onOpenOrder,
+  onRate,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -63,6 +66,7 @@ export function MessageList({
           isLatest={i === messages.length - 1}
           onSuggestion={onSuggestion}
           onOpenOrder={onOpenOrder}
+          onRate={onRate}
         />
       ))}
       <div ref={bottomRef} />

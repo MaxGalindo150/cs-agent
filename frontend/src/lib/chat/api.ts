@@ -25,6 +25,7 @@ import type {
   AttachedImage,
   ChoiceOption,
   ConversationSummary,
+  Feedback,
   Message,
   MessagePart,
   OrderCard,
@@ -79,6 +80,8 @@ export interface StreamChatOptions {
    *  harness-level escalation (session already flagged, or a resumed turn
    *  ran out of iteration budget), not an ordinary answer. */
   onNeedsHuman?: () => void;
+  /** Called with the logged reply's id (from `done`), for feedback. */
+  onMessageId?: (id: string) => void;
   /** Lets the caller cancel the request (e.g. a stop button or unmount). */
   signal?: AbortSignal;
 }
@@ -103,6 +106,7 @@ export async function streamChat({
   onDisplay,
   onLimitReached,
   onNeedsHuman,
+  onMessageId,
   signal,
 }: StreamChatOptions): Promise<void> {
   const res = await authedFetch(
@@ -201,12 +205,14 @@ export async function streamChat({
         return false;
       }
       case "done": {
-        const { reply, needs_human } = payload as {
+        const { reply, needs_human, message_id } = payload as {
           reply: string;
           needs_human?: boolean;
+          message_id?: string | null;
         };
         if (!sawDelta && !renderedChoice && reply) onDelta(reply);
         if (needs_human) onNeedsHuman?.();
+        if (typeof message_id === "string" && message_id) onMessageId?.(message_id);
         return true; // terminal
       }
       case "error":
@@ -268,12 +274,40 @@ export async function fetchMessages(
     role: string;
     content: string;
     meta: Record<string, unknown> | null;
+    feedback?: string | null;
   }> = await res.json();
   return rows.map((m) => ({
     id: m.id,
     role: m.role === "user" ? "user" : "assistant",
     parts: partsFromSegments(m.meta?.segments, m.content),
+    ...(m.role === "assistant" && {
+      serverId: m.id,
+      feedback: m.feedback === "up" || m.feedback === "down" ? m.feedback : undefined,
+    }),
   }));
+}
+
+/** Rates one reply (thumbs up/down), or withdraws the rating with null. */
+export async function rateMessage(
+  conversationId: string,
+  messageId: string,
+  feedback: Feedback | null,
+  auth?: ChatAuth,
+): Promise<void> {
+  const res = await authedFetch(
+    `${API_URL}/v1/sessions/${conversationId}/messages/${messageId}/feedback`,
+    feedback
+      ? {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rating: feedback }),
+        }
+      : { method: "DELETE" },
+    auth,
+  );
+  if (!res.ok) {
+    throw new Error(`request failed: ${res.status} ${res.statusText}`);
+  }
 }
 
 /** Deletes a conversation and its messages. */

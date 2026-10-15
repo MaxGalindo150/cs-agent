@@ -7,6 +7,8 @@
 
 export type Role = "user" | "assistant";
 
+export type Feedback = "up" | "down";
+
 /**
  * A chunk of an assistant turn, in the order it actually happened: some text,
  * then maybe a group of tool calls, then maybe more text ("I'll escalate
@@ -66,6 +68,12 @@ export interface Message {
   streaming?: boolean;
   /** Set when this message failed to complete. */
   error?: string;
+  /** The reply's id in agent-service — what feedback attaches to. Set from
+   *  the SSE `done` event for a streamed reply, or the row id on reload.
+   *  Absent until known (and for replies that weren't logged normally). */
+  serverId?: string;
+  /** The user's thumbs up/down on this reply, if any. */
+  feedback?: Feedback;
   /** Set when this reply is a harness-level escalation (session already
    *  flagged, or a resumed turn ran out of iteration budget) rather than an
    *  ordinary answer — from the SSE `done` event's `needs_human` field. */
