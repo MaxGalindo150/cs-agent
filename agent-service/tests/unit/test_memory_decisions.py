@@ -1,7 +1,7 @@
 """Unit tests for the memory facade's decision sites (Level 1 — no DB, no LLM).
 
-With a decider: the Haiku gate is never called, the verdict narrows the
-stores, the retrieved rows are re-ranked, and the skill match is a choice
+With a decider: the Haiku gate is never called, both stores are searched on
+a retrieve, the retrieved rows are re-ranked, and the skill match is a choice
 over descriptions with the keyword matcher as fallback. Without one, or on a
 failed call, the facade behaves as it always did.
 """
@@ -82,14 +82,14 @@ def _memory(
     return mem, client
 
 
-async def test_jev_gate_replaces_the_haiku_call_and_narrows_the_store(
+async def test_jev_gate_replaces_the_haiku_call_and_searches_both_stores(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     facts, episodes = _FakeStore(["[plan] pro"]), _FakeStore(["(ayer) timeout"])
     fake = (
         FakeDecider()
         .script({"needs_history": noul(0.9), "memory_kind": choice("episodes", 0.95)})
-        .script({"row_0": noul(0.8)})
+        .script({"row_0": noul(0.2), "row_1": noul(0.8)})
     )
     mem, client = _memory(fake, facts, episodes, monkeypatch)
     events: list[tuple[str, dict[str, Any]]] = []
@@ -99,7 +99,10 @@ async def test_jev_gate_replaces_the_haiku_call_and_narrows_the_store(
     )
 
     assert client.messages.calls == 0  # no Haiku round-trip
-    assert facts.queries == [] and episodes.queries == ["sigue el timeout"]
+    # A confident kind is recorded, never acted on: both stores run, and the
+    # per-row re-rank is what keeps the prompt clean.
+    assert facts.queries == ["sigue el timeout"]
+    assert episodes.queries == ["sigue el timeout"]
     assert out == "(ayer) timeout"
     gate = [e for k, e in events if k == "gate"]
     assert gate == [{"decision": "retrieve", "reason": "jev p=0.90"}]

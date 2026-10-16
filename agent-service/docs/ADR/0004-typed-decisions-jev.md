@@ -47,7 +47,7 @@ parse.
 
    | Site | Where it runs | Questions | What the harness does |
    | --- | --- | --- | --- |
-   | `retrieval` | `Memory.gated_retrieve` | `needs_history` (noul), `memory_kind` (choice) | retrieve at P ≥ 0.5; a confident kind narrows to one store |
+   | `retrieval` | `Memory.gated_retrieve` | `needs_history` (noul), `memory_kind` (choice) | retrieve at P ≥ 0.5 from both stores; the kind is recorded (`would_narrow`), not acted on |
    | `memory_select` | after the stores return | one noul per row | keep rows at P ≥ 0.5 |
    | `skill_match` | `Memory.select_skills` | choice over the audience's skill descriptions + `none` | a confident pick loads that skill (or none); unsure → keyword matcher |
    | `tool_review` | `run_loop`, before a batch executes | `fits` (noul), `best_tool` (choice), `risk` (score) | a confident misfit gets a **suggestion as its tool result, once**; re-issued, it runs |
@@ -108,7 +108,18 @@ parse.
   `docs/SECURITY.md` §4.
 - **Search query.** With the decision model the memory search runs on the message itself (Jev
   writes no text); the stores already do FTS + embeddings over it (ADR-0003) and the per-row
-  re-rank recovers precision.
+  re-rank recovers precision. Both stores are always searched: the first design narrowed to
+  one store on a confident `memory_kind`, and the live smoke showed a confident "episodes"
+  skipping the facts that held the answer. One extra Postgres query is cheaper than that
+  miss; the trace keeps `would_narrow` so the disagreement rate can be measured.
+- **State size.** A free-text `state` is capped at `max_state_chars` (48k) from the tail. Jev
+  rejects ~32k tokens with `400 max_tokens_exceeded`; the consolidation gate hit it on a user
+  with a long unconsolidated backlog (fallback: proceed), hence the cap.
+- **Recall depends on embeddings.** Facts written while the embedder was unavailable (Voyage
+  `429` during a consolidation sweep) have no vector and the semantic search excludes them;
+  the summarizer writes English while the FTS dictionary is Spanish, so keyword search does
+  not rescue them either. Pre-existing (ADR-0003), surfaced by the smoke; a backfill job for
+  `embedding IS NULL` rows is the fix, outside this ADR.
 - **Streaming.** The judge scores after the fact, so streaming is unaffected. A *reply gate*
   (hold a draft back) was deliberately not built: it can't hold a streamed reply.
 - **Testability.** `FakeDecider` scripts answers per call; every site and both loop hooks have
@@ -143,6 +154,17 @@ parse.
   site yet — the skills it maps to don't exist in this tree.
 - **Threshold re-fit.** 0.8 came from the first probe and held on the labelled set (wrong
   answers' confidence median 0.18–0.81 vs right 0.74–1.0, per site). Revisit with real traffic.
+  First live smoke (26 consumer turns): the `judge`'s `quality` sat below 0.8 on 17 of 23
+  turns, so the LLM judge ran on 74 % of them — the accept/escalate split saves little at this
+  threshold for that one site, and the labelled set's right-answer median for `judge` is 0.74.
+  A per-site threshold for `judge` (≈0.6) is the obvious candidate; decide from the replay.
+- **`resolved` is too lenient.** Jev answered `resolved=true` on every live turn, including
+  replies that only asked the customer for an order number; the LLM judge said `false` on
+  those. The noul's criteria need a sharper `false` ("the reply asks for information or
+  defers") before `jev.resolved` can be trusted as a metric.
+- **`ask_or_act` only sees `present_choice`.** In the smoke the model never called it: when it
+  wanted to ask, it asked in prose. The site is correct but rarely reached; reviewing a
+  text reply that ends in a question would be a reply gate, which streaming rules out (above).
 
 ## Reversal
 

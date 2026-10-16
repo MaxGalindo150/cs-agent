@@ -102,10 +102,11 @@ class Memory:
         and closes it. They run in sequence, never overlapping, so no
         connection is ever held across a model call.
 
-        With a decision model, the gate is one Jev call (``needs_history`` +
-        which store) and the search runs on the message itself; the rows that
-        come back are then re-ranked one by one (``memory_select``) so only
-        what is relevant enters the prompt. Without one — or when the call
+        With a decision model, the gate is one Jev call (``needs_history``;
+        the memory kind is recorded, not acted on) and both stores are
+        searched on the message itself; the rows that come back are then
+        re-ranked one by one (``memory_select``) so only what is relevant
+        enters the prompt. Without one — or when the call
         fails — the Haiku gate decides and everything found goes in, exactly
         as before.
 

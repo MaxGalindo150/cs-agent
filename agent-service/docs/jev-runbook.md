@@ -9,9 +9,14 @@ ADR-0004 en local. Todo corre con Docker + `uv`; nada depende de la nube.
 cd agent-service
 cp .env.example .env            # si no existe
 # en .env: ANTHROPIC_API_KEY, VOYAGE_API_KEY, TYPESAFE_API_KEY
-docker compose -f ../docker-compose.yml up -d postgres
+docker compose -f ../docker-compose.yml up -d postgres mock-server
 uv sync --extra dev
 ```
+
+`mock-server` (puerto 3001) es el backend BNPL de los tools consumer; sin él
+cada tool responde "service is unavailable" y `tool_review` solo ve llamadas
+que fallan. Usuarios con datos: `usr_000b` (Ana), `usr_0018` (Carlos),
+`usr_002d` (Luisana) — van en `X-User-Id`.
 
 Con `TYPESAFE_API_KEY` vacía **nada cambia**: cada sitio es un no-op y no se
 traza ninguna decisión. Con la key puesta, todos los sitios quedan activos
@@ -106,7 +111,7 @@ cada sitio:
 
 | Sitio | Mensaje de prueba | Qué mirar |
 | --- | --- | --- |
-| `retrieval` | "Otra vez me pasa lo mismo con el cierre de caja" | `gate.decision=retrieve`, `reason=jev p=…`; "Hola" → `skip` |
+| `retrieval` | "Otra vez me pasa lo mismo con el cierre de caja" | `gate.decision=retrieve`, `reason=jev p=…`; "Hola" → `skip`. `verdict.kind`/`would_narrow` se registran, no se actúa: siempre se buscan ambos stores |
 | `skill_match` | "¿Qué pasa si no cierro la caja un día?" | `decision.site=skill_match verdict.skills=['daily-closing']`; en `meta.skills` del mensaje |
 | `memory_select` | cualquier retrieve con filas | `verdict.offered` vs `verdict.kept` |
 | `tool_review` | "Dame el detalle de la orden 197688580" | `decision.site=tool_review verdict.fits=true`; un misfit confiado produce un evento `nudge` y el `tool_result` empieza por "Harness review" |

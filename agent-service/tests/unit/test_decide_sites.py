@@ -71,7 +71,7 @@ async def test_failed_call_falls_back_and_traces_the_error() -> None:
 # ---- retrieval ----------------------------------------------------------------
 
 
-async def test_retrieval_narrows_to_one_store_only_when_confident() -> None:
+async def test_retrieval_records_the_kind_but_searches_both_stores() -> None:
     events = _Events()
     fake = FakeDecider().script(
         {"needs_history": noul(0.9), "memory_kind": choice("episodes", 0.95)}
@@ -79,24 +79,25 @@ async def test_retrieval_narrows_to_one_store_only_when_confident() -> None:
     verdict = await Decisions(fake).retrieval("sigue fallando", events)
 
     assert verdict is not None
-    assert verdict.retrieve and verdict.episodes and not verdict.facts
+    assert verdict.retrieve and verdict.episodes and verdict.facts
     event = events.only()
     assert event["answers"]["needs_history"] == {"type": "noul", "p": 0.9}
     assert event["verdict"] == {
         "retrieve": True,
-        "facts": False,
-        "episodes": True,
-        "narrowed": True,
+        "kind": "episodes",
+        "would_narrow": True,
     }
 
 
-async def test_retrieval_unsure_kind_searches_both() -> None:
+async def test_retrieval_unsure_kind_is_not_a_would_narrow() -> None:
+    events = _Events()
     fake = FakeDecider().script(
         {"needs_history": noul(0.6), "memory_kind": choice("facts", 0.5)}
     )
-    verdict = await Decisions(fake).retrieval("m")
+    verdict = await Decisions(fake).retrieval("m", events)
     assert verdict is not None
     assert verdict.facts and verdict.episodes
+    assert events.only()["verdict"]["would_narrow"] is False
 
 
 async def test_retrieval_no_means_no_stores() -> None:
@@ -260,6 +261,18 @@ async def test_consolidation_gate_skips_only_clearly_empty_logs() -> None:
     )
     assert not (await d.consolidation_gate("hola / hola")).proceed
     assert (await d.consolidation_gate("tengo un problema")).proceed
+
+
+async def test_consolidation_gate_bounds_a_long_log_to_its_tail() -> None:
+    fake = FakeDecider().script({"worth_it": noul(0.9)})
+    d = Decisions(fake, DecisionConfig(max_state_chars=100))
+    log = "\n".join(f"user: mensaje {i}" for i in range(200))
+    assert (await d.consolidation_gate(log)).proceed
+    state, _ = fake.calls[0]
+    assert isinstance(state, str)
+    assert state.startswith("[earlier exchanges omitted]\n")
+    assert state.endswith("user: mensaje 199")
+    assert len(state) <= 100 + len("[earlier exchanges omitted]\n")
 
 
 async def test_fact_select_drops_facts_the_decider_rejects() -> None:

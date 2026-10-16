@@ -73,6 +73,14 @@ class DecisionConfig:
     """Per-entry truncation inside the conversation view: a tool output can
     be pages long; the reviewer needs the gist, not the payload."""
 
+    max_state_chars: int = 48_000
+    """Hard cap on a free-text ``state`` (the consolidation log). Jev rejects
+    a state above ~32k tokens with ``400 max_tokens_exceeded`` (measured:
+    96k chars of Spanish chat log passed, 128k failed); a user with a long
+    unconsolidated backlog must not turn the gate into a guaranteed
+    fallback. The tail is kept — it is the most recent, and the question is
+    "anything worth keeping", which a sample answers as well as the whole."""
+
 
 # --- verdicts -----------------------------------------------------------------
 
@@ -279,6 +287,10 @@ class Decisions:
         ``source="fallback"`` and the error). Callers take their fallback."""
         if self._decider is None:
             return None
+        if isinstance(state, str) and len(state) > self.config.max_state_chars:
+            state = (
+                "[earlier exchanges omitted]\n" + state[-self.config.max_state_chars :]
+            )
         try:
             return await self._decider.decide(state, questions)
         except JevError as exc:
@@ -337,9 +349,9 @@ class Decisions:
     async def retrieval(
         self, message: str, notify: Observer | None = None
     ) -> RetrievalVerdict | None:
-        """Does answering this message need the user's stored memory, and
-        which store? ``None`` when there is no verdict (caller runs the
-        previous gate)."""
+        """Does answering this message need the user's stored memory? The
+        kind of memory is asked too, but only recorded. ``None`` when there
+        is no verdict (caller runs the previous gate)."""
         questions: dict[str, Question] = {
             "needs_history": Noul(
                 instructions=(
@@ -381,13 +393,16 @@ class Decisions:
         needs = decision.noul("needs_history")
         kind = decision.choice("memory_kind")
         retrieve = needs.yes
-        narrow = retrieve and self._confident(kind.confidence) and kind.choice != "both"
-        facts = retrieve and (not narrow or kind.choice == "facts")
-        episodes = retrieve and (not narrow or kind.choice == "episodes")
+        # ``memory_kind`` is recorded, not acted on. Narrowing to one store
+        # saved one cheap Postgres query and, in the live smoke, cost the
+        # recall: a confident "episodes" skipped the facts that held the
+        # answer. Both stores are searched (the pre-ADR behaviour) and
+        # ``memory_select`` recovers precision row by row. ``would_narrow``
+        # in the trace measures how often a confident kind disagrees.
         verdict = RetrievalVerdict(
             retrieve=retrieve,
-            facts=facts,
-            episodes=episodes,
+            facts=retrieve,
+            episodes=retrieve,
             p_needs_history=needs.noul,
             source="jev",
         )
@@ -399,9 +414,10 @@ class Decisions:
             acted=True,
             verdict={
                 "retrieve": retrieve,
-                "facts": facts,
-                "episodes": episodes,
-                "narrowed": narrow,
+                "kind": kind.choice,
+                "would_narrow": retrieve
+                and self._confident(kind.confidence)
+                and kind.choice != "both",
             },
         )
         return verdict
