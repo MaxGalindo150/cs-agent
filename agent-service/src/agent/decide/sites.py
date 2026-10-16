@@ -50,6 +50,7 @@ from agent.decide.jev import (
     NoulCriteria,
     Question,
     Score,
+    ScoreAnswer,
 )
 from agent.observability import Observer
 
@@ -72,6 +73,15 @@ class DecisionConfig:
     max_content_chars: int = 600
     """Per-entry truncation inside the conversation view: a tool output can
     be pages long; the reviewer needs the gist, not the payload."""
+
+    judge_confidence_threshold: float = 0.85
+    """Escalate a turn to the LLM judge when less than this share of the
+    ``quality`` distribution sits within one level of the expected score.
+    Jev's own ``confidence`` on a score is the top level's probability, which
+    reads a 0.45/0.55 split between "good" and "excellent" as doubt — on the
+    first live smoke that escalated 17 of 23 turns. Adjacent mass escalates
+    only the bimodal cases (mass on 0 *and* on 3), 5 of those 23, and those
+    were exactly the turns the LLM judge scored 0."""
 
     max_state_chars: int = 48_000
     """Hard cap on a free-text ``state`` (the consolidation log). Jev rejects
@@ -152,6 +162,8 @@ class TurnJudgement:
     quality: float
     """0 harmful/wrong · 1 unhelpful · 2 partial · 3 good · 4 excellent."""
     quality_confidence: float
+    """Share of the distribution within one level of ``quality`` (not Jev's
+    top-level probability — see ``DecisionConfig.judge_confidence_threshold``)."""
     p_grounded: float
     p_resolved: float
     source: Source
@@ -248,6 +260,17 @@ def _field(block: Any, name: str) -> Any:
     if isinstance(block, dict):
         return block.get(name)
     return getattr(block, name, None)
+
+
+def _adjacent_mass(answer: ScoreAnswer) -> float:
+    """Share of a score's distribution within one level of its expected
+    value. "Good or excellent" is a confident answer on a 0–4 rubric;
+    "wrong or good" is not. Jev's ``confidence`` (top level's probability)
+    cannot tell the two apart; this can."""
+    centre = round(answer.score)
+    return sum(
+        p for level, p in answer.probabilities.items() if abs(int(level) - centre) <= 1
+    )
 
 
 def _tool_catalog(tools: Sequence[tuple[str, str]]) -> dict[str, JSONContent | None]:
@@ -826,10 +849,25 @@ class Decisions:
             ),
             "resolved": Noul(
                 instructions=(
-                    "Does the reply resolve the user's request, or correctly "
-                    "redirect them (ask for exactly the missing detail, point to "
-                    "the right place) when it cannot?"
-                )
+                    "Did the user get what they asked for in this reply? Judge "
+                    "the whole reply, not its opening line."
+                ),
+                criteria=NoulCriteria(
+                    true=(
+                        "The requested status, amount, date, list or answer is in "
+                        "the reply (it may also narrate the lookup it did); or the "
+                        "user asked for nothing concrete (a greeting) and the "
+                        "reply answers in kind; or the request cannot be done and "
+                        "the reply says exactly where or how it can be."
+                    ),
+                    false=(
+                        "The reply stops at asking the user for more information "
+                        "(an order number, details of the problem), says the data "
+                        "is unavailable right now, only announces what it will do "
+                        "without the result, or hands off to a human without an "
+                        "outcome."
+                    ),
+                ),
             ),
         }
         decision = await self._ask("judge", state, questions, notify)
@@ -838,7 +876,8 @@ class Decisions:
         quality = decision.score("quality")
         grounded = decision.noul("grounded")
         resolved = decision.noul("resolved")
-        needs_llm = not self._confident(quality.confidence)
+        quality_confidence = _adjacent_mass(quality)
+        needs_llm = quality_confidence < self.config.judge_confidence_threshold
         self._emit(
             notify,
             "judge",
@@ -847,6 +886,7 @@ class Decisions:
             acted=needs_llm,
             verdict={
                 "quality": round(quality.score, 2),
+                "quality_confidence": round(quality_confidence, 2),
                 "grounded": grounded.yes,
                 "resolved": resolved.yes,
                 "needs_llm_judge": needs_llm,
@@ -854,7 +894,7 @@ class Decisions:
         )
         return TurnJudgement(
             quality=quality.score,
-            quality_confidence=quality.confidence,
+            quality_confidence=quality_confidence,
             p_grounded=grounded.noul,
             p_resolved=resolved.noul,
             source="jev",

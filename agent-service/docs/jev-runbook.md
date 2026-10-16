@@ -116,7 +116,7 @@ cada sitio:
 | `memory_select` | cualquier retrieve con filas | `verdict.offered` vs `verdict.kept` |
 | `tool_review` | "Dame el detalle de la orden 197688580" | `decision.site=tool_review verdict.fits=true`; un misfit confiado produce un evento `nudge` y el `tool_result` empieza por "Harness review" |
 | `ask_or_act` | pedir algo resoluble y ver si el modelo pregunta | `verdict.action`, `nudged`; en `meta.nudges` si el modelo insistió |
-| `judge` | cualquier turno | tres `score` (`jev.quality`, `jev.grounded`, `jev.resolved`) con el `message_id`; `llm.quality` cuando Jev dudó |
+| `judge` | cualquier turno | tres `score` (`jev.quality`, `jev.grounded`, `jev.resolved`) con el `message_id`; `llm.quality` cuando Jev dudó (`verdict.quality_confidence` < 0.85: masa fuera de ±1 nivel, no la probabilidad máxima) |
 | presupuestos | `MAX_TOOL_CALLS_PER_TURN=1` y un pedido que use dos tools | `limit_reached reason=tool_calls`, `meta.budget_exhausted` |
 
 ### 3.3 Feedback → diagnóstico

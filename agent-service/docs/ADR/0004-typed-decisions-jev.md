@@ -54,7 +54,7 @@ parse.
    | `ask_or_act` | `run_loop`, before `present_choice` suspends | choice `ask` / `act` | a confident `act` is handed back as the tool result, once; asked again, the question shows |
    | `consolidation_gate` | worker, before the summarizer | `worth_it` (noul) | below 0.3: mark consolidated, write nothing |
    | `fact_select` | worker, after the summarizer | one noul per candidate fact, with what is already stored | write only kept facts |
-   | `judge` | end of every turn, after persistence | `quality` (score 0–4), `grounded`, `resolved` | scores on the message; an unsure `quality` escalates to the LLM judge |
+   | `judge` | end of every turn, after persistence | `quality` (score 0–4), `grounded`, `resolved` | scores on the message; a bimodal `quality` (adjacent mass < 0.85) escalates to the LLM judge |
    | `diagnose` | on a thumbs-down | `failure_site` (choice), `actionable` (noul) | a categorical score on the message |
    | `skill_proposal` | `propose_skill` tool (flag, off) | `recurring`, `duplicate`, `safe` (nouls) | traced for human review; never loaded, never written |
 
@@ -154,14 +154,20 @@ parse.
   site yet — the skills it maps to don't exist in this tree.
 - **Threshold re-fit.** 0.8 came from the first probe and held on the labelled set (wrong
   answers' confidence median 0.18–0.81 vs right 0.74–1.0, per site). Revisit with real traffic.
-  First live smoke (26 consumer turns): the `judge`'s `quality` sat below 0.8 on 17 of 23
-  turns, so the LLM judge ran on 74 % of them — the accept/escalate split saves little at this
-  threshold for that one site, and the labelled set's right-answer median for `judge` is 0.74.
-  A per-site threshold for `judge` (≈0.6) is the obvious candidate; decide from the replay.
-- **`resolved` is too lenient.** Jev answered `resolved=true` on every live turn, including
-  replies that only asked the customer for an order number; the LLM judge said `false` on
-  those. The noul's criteria need a sharper `false` ("the reply asks for information or
-  defers") before `jev.resolved` can be trusted as a metric.
+- **Judge confidence is adjacent mass, not Jev's top-level probability.** On the first live
+  smoke (26 consumer turns) Jev's `confidence` on `quality` was below 0.8 on 17 of 23 turns
+  and the LLM judge ran on 74 % of them — yet most of those were a 0.45/0.55 split between
+  "good" and "excellent", not doubt. The site now reads confidence as the share of the
+  distribution within one level of the expected score (`DecisionConfig.judge_confidence_threshold`,
+  0.85). Re-judging the same 26 turns: 5 escalations, and those five were exactly the turns the
+  LLM judge had scored 0 (bimodal "wrong or good" distributions). Labelled set: 12/12.
+- **`resolved` re-criteria'd.** The first wording counted "ask for exactly the missing detail"
+  as resolved, and Jev said `true` on 23 of 26 live turns. The noul now asks whether the user
+  got what they asked for, with "stops at asking for an order number / announces what it will
+  do / hands off without an outcome" as `false` and "data delivered, even after narrating the
+  lookup; greeting answered in kind; correctly closed" as `true`. Same 26 turns: 7 `true`,
+  agreement with the LLM judge 11/17 (the six disagreements are turns both judges rate low, or
+  "no tengo registro" replies the LLM judge forgave).
 - **`ask_or_act` only sees `present_choice`.** In the smoke the model never called it: when it
   wanted to ask, it asked in prose. The site is correct but rarely reached; reviewing a
   text reply that ends in a question would be a reply gate, which streaming rules out (above).

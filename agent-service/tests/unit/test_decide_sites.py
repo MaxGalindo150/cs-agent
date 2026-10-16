@@ -306,6 +306,41 @@ async def test_judge_flags_llm_escalation_when_quality_is_unsure() -> None:
     assert events.only()["verdict"]["resolved"] is False
 
 
+async def test_judge_reads_confidence_as_mass_around_the_expected_level() -> None:
+    # "good or excellent" (0.45/0.55): Jev's own confidence is 0.55, but
+    # the answer is not in doubt — no escalation.
+    adjacent = FakeDecider().script(
+        {
+            "quality": score(
+                3.55, 0.55, levels=5, probabilities={"3": 0.45, "4": 0.55}
+            ),
+            "grounded": noul(0.9),
+            "resolved": noul(0.9),
+        }
+    )
+    verdict = await Decisions(adjacent).judge_turn("u", "r", [], [], "consumer")
+    assert verdict is not None and not verdict.needs_llm_judge
+    assert verdict.quality_confidence == 1.0
+
+    # "wrong or good" (0.35 on 0, 0.48 on 3): the one case worth a second
+    # opinion, and the one the top-level probability cannot flag.
+    bimodal = FakeDecider().script(
+        {
+            "quality": score(
+                2.04,
+                0.48,
+                levels=5,
+                probabilities={"0": 0.35, "2": 0.04, "3": 0.48, "4": 0.13},
+            ),
+            "grounded": noul(0.5),
+            "resolved": noul(0.5),
+        }
+    )
+    verdict = await Decisions(bimodal).judge_turn("u", "r", [], [], "consumer")
+    assert verdict is not None and verdict.needs_llm_judge
+    assert round(verdict.quality_confidence, 2) == 0.52  # levels 1–3 around 2
+
+
 async def test_judge_confident_does_not_escalate() -> None:
     fake = FakeDecider().script(
         {

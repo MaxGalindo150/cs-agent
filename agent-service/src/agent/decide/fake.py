@@ -83,9 +83,18 @@ def choice(label: str, confidence: float, **others: float) -> dict[str, Any]:
     }
 
 
-def score(level: float, confidence: float, levels: int = 3) -> dict[str, Any]:
-    probabilities = {str(i): 0.0 for i in range(levels)}
-    probabilities[str(int(level))] = confidence
+def score(
+    level: float,
+    confidence: float,
+    levels: int = 3,
+    probabilities: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """A score answer. By default all of ``confidence`` sits on ``level``;
+    pass ``probabilities`` to shape the distribution (a split between two
+    adjacent levels, a bimodal one) the way the live model returns it."""
+    if probabilities is None:
+        probabilities = {str(i): 0.0 for i in range(levels)}
+        probabilities[str(int(level))] = confidence
     return {
         "type": "score",
         "score": level,
